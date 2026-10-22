@@ -1,0 +1,193 @@
+name: DigiSmart 正式版 OSS 发布
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: '正式版版本号，例如 1.0.24'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: digismart-stable-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare stable release version
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+
+      - name: Resolve stable release version
+        id: version
+        shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.release_version }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$REQUESTED_VERSION"
+          fi
+
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid stable release version: $version" >&2
+            exit 1
+          fi
+
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+          echo "Building stable release $version"
+
+  build:
+    name: Build stable ${{ matrix.platform }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS
+            runner: macos-15
+            script: build:mac
+            artifact: release-stable-macos
+            directory: dist-mac
+            metadata: latest-mac.yml
+          - platform: Windows x64
+            runner: windows-2022
+            script: build:win
+            artifact: release-stable-windows-x64
+            directory: dist-win-x64
+            metadata: latest.yml
+    runs-on: ${{ matrix.runner }}
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Select modern release manifest
+        shell: bash
+        run: node scripts/use-release-manifest.cjs modern
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set release version
+        shell: bash
+        run: node scripts/set-release-version.cjs "$RELEASE_VERSION"
+
+      - name: Build stable release package
+        run: npm run ${{ matrix.script }}
+
+      - name: Stage stable release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "release-oss/DigiSmart/${{ matrix.directory }}"
+          cp electron_dist/modern/* "release-oss/DigiSmart/${{ matrix.directory }}/"
+          test -f "release-oss/DigiSmart/${{ matrix.directory }}/${{ matrix.metadata }}"
+          find release-oss/DigiSmart -maxdepth 2 -type f -print
+
+      - name: Upload staged stable release
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release-oss/DigiSmart
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Create GitHub stable release and trigger Yunxiao
+    needs:
+      - prepare
+      - build
+    runs-on: ubuntu-22.04
+    environment: production
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      YUNXIAO_STABLE_RELEASE_WEBHOOK_URL: ${{ secrets.YUNXIAO_DIGISMART_STABLE_WEBHOOK_URL }}
+    steps:
+      - name: Download staged stable releases
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-stable-*
+          path: release-oss/DigiSmart
+          merge-multiple: true
+
+      - name: Verify staged stable release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f release-oss/DigiSmart/dist-mac/latest-mac.yml
+          test -f release-oss/DigiSmart/dist-win-x64/latest.yml
+          find release-oss/DigiSmart -maxdepth 2 -type f -print
+
+      - name: Package stable release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -czf "$RUNNER_TEMP/DigiSmart-${RELEASE_VERSION}-mac.tar.gz" \
+            -C release-oss/DigiSmart dist-mac
+          tar -czf "$RUNNER_TEMP/DigiSmart-${RELEASE_VERSION}-win-x64.tar.gz" \
+            -C release-oss/DigiSmart dist-win-x64
+
+      - name: Create GitHub stable release
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="digismart-stable-${RELEASE_VERSION}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "GitHub release already exists: $tag" >&2
+            exit 1
+          fi
+
+          gh release create "$tag" \
+            "$RUNNER_TEMP/DigiSmart-${RELEASE_VERSION}-mac.tar.gz" \
+            "$RUNNER_TEMP/DigiSmart-${RELEASE_VERSION}-win-x64.tar.gz" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "DigiSmart ${RELEASE_VERSION}" \
+            --notes "正式版 ${RELEASE_VERSION}" \
+            --latest
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger Yunxiao stable release pipeline
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          test -n "$YUNXIAO_STABLE_RELEASE_WEBHOOK_URL" || {
+            echo "Missing YUNXIAO_DIGISMART_STABLE_WEBHOOK_URL GitHub secret" >&2
+            exit 1
+          }
+          payload="$(printf '{\"RELEASE_TAG\":\"%s\"}' "$RELEASE_TAG")"
+          curl --fail --silent --show-error --location \
+            --retry 5 --retry-delay 2 \
+            --connect-timeout 20 --max-time 60 \
+            -X POST \
+            -H 'Content-Type: application/json' \
+            --data "$payload" \
+            "$YUNXIAO_STABLE_RELEASE_WEBHOOK_URL"
