@@ -1,0 +1,190 @@
+// cover some element-ui styles
+
+.el-breadcrumb__inner,
+.el-breadcrumb__inner a {
+  font-weight: 400 !important;
+}
+
+.el-upload {
+  input[type="file"] {
+    display: none !important;
+  }
+}
+
+.el-upload__input {
+  display: none;
+}
+
+.cell {
+  .el-tag {
+    margin-right: 0px;
+  }
+}
+
+.small-padding {
+  .cell {
+    padding-left: 5px;
+    padding-right: 5px;
+  }
+}
+
+.fixed-width {
+  .el-button--mini {
+    padding: 7px 10px;
+    width: 60px;
+  }
+}
+
+.status-col {
+  .cell {
+    padding: 0 10px;
+    text-align: center;
+
+    .el-tag {
+      margin-right: 0px;
+    }
+  }
+}
+
+// to fixed https://github.com/ElemeFE/element/issues/2461
+// Dialog 样式已移至底部全局弹窗圆角部分
+
+// refine element ui upload
+.upload-container {
+  .el-upload {
+    width: 100%;
+
+    .el-upload-dragger {
+      width: 100%;
+      height: 200px;
+    }
+  }
+}
+
+// dropdown
+.el-dropdown-menu {
+  a {
+    display: block
+  }
+}
+
+// fix date-picker ui bug in filter-item
+.el-range-editor.el-input__inner {
+  display: inline-flex !important;
+}
+
+// to fix el-date-picker css style
+.el-range-separator {
+  box-sizing: content-box;
+}
+
+.el-menu--collapse
+  > div
+  > .el-submenu
+  > .el-submenu__title
+  .el-submenu__icon-arrow {
+  display: none;
+}
+
+.el-dropdown .el-dropdown-link{
+  color: var(--el-color-primary) !important;
+}
+
+// 限制 Tooltip 的宽度
+.el-tooltip__popper {
+  max-width: 400px !important;
+  word-wrap: break-word;
+  word-break: break-all;
+}
+
+// ========== 全局弹窗圆角 ==========
+// Dialog 弹窗圆角
+.el-dialog {
+  transform: none;
+  left: 0;
+  position: relative;
+  border-radius: 16px !important;
+  overflow: hidden;
+  
+  .el-dialog__header {
+    border-radius: 16px 16px 0 0;
+  }
+  
+  .el-dialog__body {
+    padding: 20px 24px;
+  }
+  
+  .el-dialog__footer {
+    border-radius: 0 0 16px 16px;
+  }
+}
+
+// MessageBox 弹窗圆角
+.el-message-box {
+  border-radius: 16px !important;
+  overflow: hidden;
+}
+
+// Drawer 抽屉圆角
+.el-drawer {
+  border-radius: 16px 0 0 16px !important;
+  
+  &.rtl {
+    border-radius: 0 16px 16px 0 !important;
+  }
+  
+  &.ttb {
+    border-radius: 0 0 16px 16px !important;
+  }
+  
+  &.btt {
+    border-radius: 16px 16px 0 0 !important;
+  }
+}
+
+// Popover 弹出框圆角
+.el-popover {
+  border-radius: 12px !important;
+}
+
+// Dropdown 下拉菜单圆角
+.el-dropdown__popper {
+  border-radius: 12px !important;
+}
+
+// Select 下拉圆角
+.el-select__popper {
+  border-radius: 12px !important;
+}
+
+// ========== 全局图标尺寸 ==========
+// 增大默认图标尺寸
+.el-icon {
+  font-size: 18px;
+}
+
+// 按钮内图标
+.el-button .el-icon {
+  font-size: 16px;
+}
+
+// 输入框图标
+.el-input__icon {
+  font-size: 18px;
+}
+
+// 表格操作列图标
+.el-table .el-icon {
+  font-size: 18px;
+}
+
+// 菜单图标
+.el-menu-item .el-icon,
+.el-submenu__title .el-icon {
+  font-size: 20px;
+}
+
+// 标签页图标
+.el-tabs__item .el-icon {
+  font-size: 16px;
+}

@@ -1,0 +1,76 @@
+// 字体文件配置
+// 将你的字体文件（.ttf, .woff, .woff2, .otf 等）放在 src/assets/fonts/ 目录下
+
+// PingFang 苹方字体
+@font-face {
+  font-family: 'PingFang SC Custom';
+  src: url('@/assets/fonts/PINGFANG MEDIUM.TTF') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'PingFang SC Custom';
+  src: url('@/assets/fonts/PINGFANG BOLD.TTF') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'PingFang SC Custom';
+  src: url('@/assets/fonts/PINGFANG HEAVY.TTF') format('truetype');
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+// 示例：引入自定义字体
+// @font-face {
+//   font-family: 'CustomFont';
+//   src: url('@/assets/fonts/CustomFont-Regular.woff2') format('woff2'),
+//        url('@/assets/fonts/CustomFont-Regular.woff') format('woff'),
+//        url('@/assets/fonts/CustomFont-Regular.ttf') format('truetype');
+//   font-weight: normal;
+//   font-style: normal;
+//   font-display: swap;
+// }
+
+// @font-face {
+//   font-family: 'CustomFont';
+//   src: url('@/assets/fonts/CustomFont-Bold.woff2') format('woff2'),
+//        url('@/assets/fonts/CustomFont-Bold.woff') format('woff'),
+//        url('@/assets/fonts/CustomFont-Bold.ttf') format('truetype');
+//   font-weight: bold;
+//   font-style: normal;
+//   font-display: swap;
+// }
+
+// 阿里巴巴普惠体示例（如果你要使用这个字体）
+// @font-face {
+//   font-family: 'Alibaba PuHuiTi';
+//   src: url('@/assets/fonts/Alibaba-PuHuiTi-Regular.woff2') format('woff2'),
+//        url('@/assets/fonts/Alibaba-PuHuiTi-Regular.woff') format('woff');
+//   font-weight: 400;
+//   font-style: normal;
+//   font-display: swap;
+// }
+
+// @font-face {
+//   font-family: 'Alibaba PuHuiTi';
+//   src: url('@/assets/fonts/Alibaba-PuHuiTi-Medium.woff2') format('woff2'),
+//        url('@/assets/fonts/Alibaba-PuHuiTi-Medium.woff') format('woff');
+//   font-weight: 500;
+//   font-style: normal;
+//   font-display: swap;
+// }
+
+// @font-face {
+//   font-family: 'Alibaba PuHuiTi';
+//   src: url('@/assets/fonts/Alibaba-PuHuiTi-Bold.woff2') format('woff2'),
+//        url('@/assets/fonts/Alibaba-PuHuiTi-Bold.woff') format('woff');
+//   font-weight: 700;
+//   font-style: normal;
+//   font-display: swap;
+// }

@@ -1,0 +1,18 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/your_database?useUnicode=true&characterEncoding=utf8
+    username: root
+    password: your_password
+
+mqtt:
+  broker-url: tcp://your-mqtt-broker:1883
+  client-id: backend-status-monitor
+  username: backend
+  password: your_mqtt_password
+  topics:
+    status: /as/mqtt/status/
+  qos: 1

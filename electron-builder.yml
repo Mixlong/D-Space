@@ -1,0 +1,83 @@
+appId: com.digismart.electron.v2
+productName: D-Space
+copyright: Copyright © 2025 D-Space
+
+# 自动更新配置
+publish:
+  provider: generic
+  url: https://bikewise.oss-cn-shenzhen.aliyuncs.com/d-space/digismart-desktop
+
+directories:
+  output: electron_dist
+  buildResources: build
+
+files:
+  - dist/**/*
+  - electron/**/*
+  - package.json
+  - "!**/*.map"
+  - "!**/node_modules/**"
+
+extraResources:
+  - from: src/assets/logo
+    to: logo
+    filter:
+      - "**/*"
+
+win:
+  icon: src/assets/logo/logo.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: true
+  installerIcon: src/assets/logo/logo.ico
+  uninstallerIcon: src/assets/logo/logo.ico
+  installerHeaderIcon: src/assets/logo/logo.ico
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: D-Space
+  include: build/installer.nsh
+
+mac:
+  icon: src/assets/logo/logo.icns
+  category: public.app-category.business
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
+  artifactName: ${productName}-${arch}.${ext}
+
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+  title: D-Space ${version}
+  format: UDZO
+  background: null
+
+linux:
+  icon: src/assets/logo/logo.png
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  category: Office
+  artifactName: ${productName}-${arch}.${ext}
