@@ -14,6 +14,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
+const crypto = require('node:crypto')
 const { spawnSync } = require('node:child_process')
 
 const ROOT = path.resolve(__dirname, '..')
@@ -23,7 +24,7 @@ const CHANNELS = {
   legacy: { electronMajor: 21, manifest: 'package.legacy.json', config: 'electron-builder.legacy.cjs' },
 }
 const EDITIONS = [
-  { id: 'mac', channel: 'modern', os: 'darwin', label: 'Mac Intel + Apple Silicon', args: ['--mac', 'zip', '--x64', '--arm64'] },
+  { id: 'mac', channel: 'modern', os: 'darwin', label: 'Mac Intel + Apple Silicon', args: ['--mac', 'zip', 'dmg', '--x64', '--arm64'] },
   { id: 'win10', channel: 'modern', os: 'win32', label: 'Windows 10/11 x64', args: ['--win', 'nsis', '--x64'] },
   { id: 'win7', channel: 'legacy', os: 'win32', label: 'Windows 7/8/8.1 x64', args: ['--win', 'nsis', '--x64'] },
 ]
@@ -201,9 +202,12 @@ function collectOutput(buildOutput, finalRoot, edition, version) {
   const result = []
   let wanted
   if (edition.id === 'mac') {
+    // .zip 供客户端自动更新（ditto 替换），.dmg 供网页端新用户首次安装（网页把 .zip 后缀替换为 .dmg）
     wanted = [
       { name: `D-Space-${version}-Mac-Intel-x64.zip`, match: name => /-x64\.zip$/i.test(name) },
       { name: `D-Space-${version}-Mac-AppleSilicon-arm64.zip`, match: name => /-arm64\.zip$/i.test(name) },
+      { name: `D-Space-${version}-Mac-Intel-x64.dmg`, match: name => /-x64\.dmg$/i.test(name) },
+      { name: `D-Space-${version}-Mac-AppleSilicon-arm64.dmg`, match: name => /-arm64\.dmg$/i.test(name) },
     ]
   } else {
     const isLegacy = edition.id === 'win7'
@@ -229,6 +233,47 @@ function collectOutput(buildOutput, finalRoot, edition, version) {
     result.push(group.name)
   }
   return result
+}
+// 方案 A：安装包文件名带版本号，每次发版同步更新字典 desktop_update_config 的 downloadUrl。
+// 默认 OSS 目录可通过 DSPACE_DOWNLOAD_BASE 覆盖。
+const DOWNLOAD_BASE = (process.env.DSPACE_DOWNLOAD_BASE || 'https://file.riding-evolved.com/d-space').replace(/\/+$/, '')
+const DICT_FILE_NAME = 'desktop_update_config.json'
+function sha512Hex(file) {
+  return crypto.createHash('sha512').update(fs.readFileSync(file)).digest('hex')
+}
+function buildDictConfig(finalRoot, version, builtNames, baseUrl = DOWNLOAD_BASE) {
+  const url = (channel, name) => `${baseUrl}/digismart-desktop-${channel}/${name}`
+  const sha = name => sha512Hex(path.join(finalRoot, name))
+  const has = name => builtNames.includes(name)
+  const items = []
+  const push = (dictLabel, dictSort, downloadUrl, sha512, description) => {
+    const remark = { enabled: true, version, minVersion: '1.0.0', downloadUrl, sha512, description }
+    items.push({
+      dictType: 'desktop_update_config',
+      dictLabel,
+      dictValue: version,
+      dictSort,
+      status: '0',
+      remark: JSON.stringify(remark),
+      remarkPretty: remark,
+    })
+  }
+  const win10 = `D-Space-${version}-Win10-11-x64.exe`
+  const win7 = `D-Space-${version}-Win7-x64.exe`
+  const macArm = `D-Space-${version}-Mac-AppleSilicon-arm64.zip`
+  const macX64 = `D-Space-${version}-Mac-Intel-x64.zip`
+  if (has(win10)) push('modern_win', 1, url('modern', win10), sha(win10), '现代版 Windows 桌面端升级配置（Win 10/11）')
+  if (has(win7)) push('legacy_win', 2, url('legacy', win7), sha(win7), '兼容版 Windows 桌面端升级配置（Win 7/8/8.1）')
+  if (has(macArm) && has(macX64)) {
+    push('modern_mac', 3,
+      { arm64: url('modern', macArm), x64: url('modern', macX64) },
+      { arm64: sha(macArm), x64: sha(macX64) },
+      'Mac 桌面端升级配置（M系列 arm64 / Intel芯片 x64）')
+  }
+  if (!items.length) return null
+  const file = path.join(finalRoot, DICT_FILE_NAME)
+  fs.writeFileSync(file, JSON.stringify(items, null, 2) + '\n')
+  return { file, items }
 }
 async function main(args = process.argv.slice(2)) {
   const options = parseOptions(args)
@@ -296,7 +341,16 @@ async function main(args = process.argv.slice(2)) {
   }
   console.log('产物目录：' + finalRoot)
   for (const name of built) console.log('  ' + name)
-  return { editions, available, unavailable, blockers, built, incomplete, finalRoot }
+  const dict = buildDictConfig(finalRoot, version, built)
+  if (dict) {
+    console.log('\n字典配置已生成（上传安装包后，按 dictLabel 把 remark 粘贴到 desktop_update_config）：')
+    console.log('  ' + dict.file)
+    for (const item of dict.items) {
+      const target = item.remarkPretty.downloadUrl
+      console.log('  • ' + item.dictLabel + ' → ' + (typeof target === 'string' ? target : JSON.stringify(target)))
+    }
+  }
+  return { editions, available, unavailable, blockers, built, incomplete, finalRoot, dict }
 }
 
 if (require.main === module) {
@@ -308,4 +362,4 @@ if (require.main === module) {
     process.exitCode = 1
   })
 }
-module.exports = { main, parseOptions, validateConfig, selectedEditions, availabilityForEdition, resolveElectronRuntime, collectOutput }
+module.exports = { main, parseOptions, validateConfig, selectedEditions, availabilityForEdition, resolveElectronRuntime, collectOutput, buildDictConfig }

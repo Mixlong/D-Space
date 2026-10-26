@@ -4,13 +4,13 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const test = require('node:test')
-const { parseOptions, selectedEditions, validateConfig, collectOutput, availabilityForEdition, resolveElectronRuntime, main } = require('./build-all-platforms.cjs')
+const { parseOptions, selectedEditions, validateConfig, collectOutput, availabilityForEdition, resolveElectronRuntime, main, buildDictConfig } = require('./build-all-platforms.cjs')
 
 test('one-click matrix separates Windows 7 and modern runtime', () => {
   const items = selectedEditions('all')
   assert.deepEqual(items.map(x => x.id), ['mac', 'win10', 'win7'])
   assert.deepEqual(items.map(x => x.channel), ['modern', 'modern', 'legacy'])
-  assert.deepEqual(items[0].args, ['--mac', 'zip', '--x64', '--arm64'])
+  assert.deepEqual(items[0].args, ['--mac', 'zip', 'dmg', '--x64', '--arm64'])
   assert.deepEqual(items[1].args, ['--win', 'nsis', '--x64'])
   assert.deepEqual(items[2].args, ['--win', 'nsis', '--x64'])
   assert.match(validateConfig().version, /^\d+\.\d+\.\d+/)
@@ -53,7 +53,7 @@ test('one-click build reuses installed tools and avoids re-installing all npm pa
   assert(script.includes("'-c.electronVersion=' + resolveElectronRuntime"))
 })
 
-test('collector creates exactly four ZIP/EXE installers in ONE flat folder', t => {
+test('collector creates Mac ZIP+DMG and Windows EXE installers in ONE flat folder', t => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'd-space-collect-'))
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }))
   const modern = path.join(tmp, 'modern')
@@ -79,15 +79,35 @@ test('collector creates exactly four ZIP/EXE installers in ONE flat folder', t =
   assert.deepEqual([...made].sort(), [
     'D-Space-1.0.26-Mac-Intel-x64.zip',
     'D-Space-1.0.26-Mac-AppleSilicon-arm64.zip',
+    'D-Space-1.0.26-Mac-Intel-x64.dmg',
+    'D-Space-1.0.26-Mac-AppleSilicon-arm64.dmg',
     'D-Space-1.0.26-Win10-11-x64.exe',
     'D-Space-1.0.26-Win7-x64.exe',
   ].sort())
   assert.deepEqual(fs.readdirSync(output).sort(), made.slice().sort())
   assert.equal(made.filter(item => item.endsWith('.zip')).length, 2)
+  assert.equal(made.filter(item => item.endsWith('.dmg')).length, 2)
   assert.equal(made.filter(item => item.endsWith('.exe')).length, 2)
   assert(made.every(item => fs.statSync(path.join(output, item)).isFile()))
-  assert(!fs.readdirSync(output).some(item => /Portable|blockmap|\.dmg|\.yml/.test(item)))
+  assert(!fs.readdirSync(output).some(item => /Portable|blockmap|\.yml/.test(item)))
   assert.throws(() => collectOutput(modern, output, mac, '1.0.26'), /禁止覆盖/)
+
+  // 方案 A：生成带版本号下载地址与 sha512 的字典配置
+  const dict = buildDictConfig(output, '1.0.26', made, 'https://file.example.com/d-space')
+  const byLabel = Object.fromEntries(dict.items.map(item => [item.dictLabel, JSON.parse(item.remark)]))
+  assert.deepEqual(Object.keys(byLabel).sort(), ['legacy_win', 'modern_mac', 'modern_win'])
+  assert.equal(byLabel.modern_win.downloadUrl,
+    'https://file.example.com/d-space/digismart-desktop-modern/D-Space-1.0.26-Win10-11-x64.exe')
+  assert.equal(byLabel.legacy_win.downloadUrl,
+    'https://file.example.com/d-space/digismart-desktop-legacy/D-Space-1.0.26-Win7-x64.exe')
+  assert.deepEqual(byLabel.modern_mac.downloadUrl, {
+    arm64: 'https://file.example.com/d-space/digismart-desktop-modern/D-Space-1.0.26-Mac-AppleSilicon-arm64.zip',
+    x64: 'https://file.example.com/d-space/digismart-desktop-modern/D-Space-1.0.26-Mac-Intel-x64.zip',
+  })
+  assert.match(byLabel.modern_win.sha512, /^[0-9a-f]{128}$/)
+  assert.match(byLabel.modern_mac.sha512.arm64, /^[0-9a-f]{128}$/)
+  // 网页端把 .zip 替换为 .dmg 后必须能找到同名 DMG
+  assert(made.includes(path.basename(byLabel.modern_mac.downloadUrl.arm64).replace(/\.zip$/, '.dmg')))
 })
 
 test('collector cannot report success if only metadata and no installer exists', t => {

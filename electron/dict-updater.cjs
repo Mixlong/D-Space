@@ -9,7 +9,7 @@
  *     "version": "1.0.27",             // 字典里的最新版本号，与当前版本比较
  *     "downloadUrl": "https://file.riding-evolved.com/xxx/D-Space-x64.exe"
  *                    或 {"arm64": "https://.../a.zip", "x64": "https://.../b.zip"},
- *     "sha512": "hex 或 base64",        // 安装包 sha512，下载后强制校验
+ *     "sha512": "hex 或 base64",        // 安装包 sha512；Mac 可为 {"arm64": "...", "x64": "..."}
  *     "minVersion": "1.0.20"            // 当前版本低于它时强制更新
  *   }
  *
@@ -196,7 +196,11 @@ function createDictUpdater({ app, logger, getWindow, downloadToFile, macUpdater,
       send('update-install-failed', { message })
       return
     }
-    const sha512 = typeof safePolicy.sha512 === 'string' ? safePolicy.sha512.trim() : ''
+    const rawSha512 = safePolicy.sha512
+    // sha512 可以是字符串，也可以与 downloadUrl 一样按架构区分 {arm64, x64}（Mac 双包）
+    const sha512 = (typeof rawSha512 === 'string'
+      ? rawSha512
+      : pickDownloadUrl({ downloadUrl: rawSha512 }, process.arch)).trim()
     if (REQUIRE_SHA512 && !sha512) {
       const message = '更新包未配置 sha512 校验值，请联系管理员'
       log('[更新] ' + message)

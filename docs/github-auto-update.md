@@ -24,7 +24,7 @@ Electron 自动更新
 正式版 OSS 地址保持为：
 
 ```text
-https://bikewise.oss-cn-shenzhen.aliyuncs.com/d-space/digismart-desktop-modern
+https://file.riding-evolved.com/d-space/digismart-desktop-modern
 ```
 
 ## GitHub Actions
