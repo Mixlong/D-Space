@@ -266,6 +266,7 @@ import { getAssignmentInProgressCount } from '@/api/todo'
 import { mqttClient } from '@/utils/mqttClient'
 import { MQTT_MESSAGE_TYPE } from '@/utils/mqttMessageTypes'
 import { getAvatarUrl } from '@/utils/avatar'
+import { getBusinessLinkRouteLocation, getIssueTrackingIdFromUrl, getIssueTrackingRouteLocation, getIssueTrackingViewModeByTabType } from '@/utils/issueTracking'
 import defAva from '@/assets/images/profile.jpg'
 
 const userStore = useUserStore()
@@ -273,6 +274,57 @@ const mqttStore = useMqttStore()
 const contactsStore = useContactsStore()
 const route = useRoute()
 const router = useRouter()
+const ISSUE_FEEDBACK_BUSINESS_TYPE = 15
+
+const parseMessageExtra = (msg = {}) => {
+  if (!msg.extra) return {}
+  if (typeof msg.extra === 'object') return msg.extra
+
+  try {
+    return JSON.parse(msg.extra)
+  } catch (error) {
+    console.warn('[Chat] 解析系统消息 extra 失败:', error)
+    return {}
+  }
+}
+
+const getMessageBusinessType = (msg = {}) => {
+  const extra = parseMessageExtra(msg)
+  return Number(extra.businessType ?? msg.businessType)
+}
+
+const getIssueFeedbackRouteLocationFromMessage = (msg = {}) => {
+  const extra = parseMessageExtra(msg)
+  const url = extra.url || msg.url || ''
+  const id = extra.businessId ||
+    msg.businessId ||
+    extra.id ||
+    msg.id ||
+    getIssueTrackingIdFromUrl(url)
+  const tabType = extra.issueMessageType ||
+    msg.issueMessageType ||
+    extra.tabType ||
+    msg.tabType ||
+    ''
+  const viewMode = extra.viewMode || msg.viewMode || getIssueTrackingViewModeByTabType(tabType)
+  const issueQuery = {
+    ...(tabType ? { tabType, issueMessageType: tabType } : {}),
+    ...(viewMode ? { viewMode } : {})
+  }
+
+  if (url) {
+    return getBusinessLinkRouteLocation(url, {
+      id,
+      ...issueQuery
+    })
+  }
+
+  return getIssueTrackingRouteLocation({
+    id,
+    query: issueQuery
+  })
+}
+
 // 优先使用昵称，没有昵称则使用账号名
 const userName = computed(() => userStore.nickName || userStore.name)
 // 使用缓存的 base64 头像 - 过滤掉默认头像
@@ -1367,22 +1419,25 @@ const isSystemSession = (session) => {
 // 获取系统消息标题
 const getSystemMessageTitle = (msg) => {
   // 解析 extra 字段获取业务信息
-  const extra = msg.extra ? (typeof msg.extra === 'string' ? JSON.parse(msg.extra) : msg.extra) : {}
-  const businessType = extra.businessType || msg.businessType
+  const businessType = getMessageBusinessType(msg)
   
-  // 根据 businessType 返回标题：1=系统通知, 2=我的待办, 3=我的流程
+  // 根据 businessType 返回标题：1=系统通知, 2=我的待办, 3=我的流程, 15=问题反馈
   const businessTypeMap = {
     1: '【系统通知】',
     2: '【我的待办】',
-    3: '【我的流程】'
+    3: '【我的流程】',
+    15: '【问题反馈】'
   }
   return businessTypeMap[businessType] || '【系统通知】'
 }
 
 // 获取系统消息状态文字
 const getSystemMessageStatus = (msg) => {
-  const extra = msg.extra ? (typeof msg.extra === 'string' ? JSON.parse(msg.extra) : msg.extra) : {}
-  const massageType = extra.massageType || msg.massageType
+  const businessType = getMessageBusinessType(msg)
+  if (businessType === ISSUE_FEEDBACK_BUSINESS_TYPE) return '待审核'
+
+  const extra = parseMessageExtra(msg)
+  const massageType = Number(extra.massageType ?? msg.massageType)
   
   // massageType: 1=待办提醒, 2=拒绝待办, 3=接受待办, 4=完成待办, 5=待办延期, 
   // 6=交办转移, 7=待办逾期提醒, 8=交办逾期提醒, 9=撤销待办提醒, 10=交办完成提醒
@@ -1403,8 +1458,11 @@ const getSystemMessageStatus = (msg) => {
 
 // 获取系统消息状态标签类型（颜色）
 const getSystemMessageTagType = (msg) => {
-  const extra = msg.extra ? (typeof msg.extra === 'string' ? JSON.parse(msg.extra) : msg.extra) : {}
-  const massageType = extra.massageType || msg.massageType
+  const businessType = getMessageBusinessType(msg)
+  if (businessType === ISSUE_FEEDBACK_BUSINESS_TYPE) return 'warning'
+
+  const extra = parseMessageExtra(msg)
+  const massageType = Number(extra.massageType ?? msg.massageType)
   
   // 根据 massageType 返回不同颜色
   // success: 绿色（完成、接受）
@@ -1429,12 +1487,17 @@ const getSystemMessageTagType = (msg) => {
 // 处理系统消息卡片点击
 const handleSystemMessageClick = (msg) => {
   // 解析 extra 字段获取业务信息
-  const extra = msg.extra ? (typeof msg.extra === 'string' ? JSON.parse(msg.extra) : msg.extra) : {}
-  const businessType = extra.businessType || msg.businessType
-  const massageType = extra.massageType || msg.massageType
+  const extra = parseMessageExtra(msg)
+  const businessType = getMessageBusinessType(msg)
+  const massageType = Number(extra.massageType ?? msg.massageType)
   
   console.log('[Chat] 点击系统消息:', msg, extra, 'businessType:', businessType, 'massageType:', massageType)
   
+  if (businessType === ISSUE_FEEDBACK_BUSINESS_TYPE) {
+    router.push(getIssueFeedbackRouteLocationFromMessage(msg))
+    return
+  }
+
   // businessType = 1 是普通系统消息，不跳转
   if (businessType === 1) {
     console.log('[Chat] 普通系统消息，不跳转')
@@ -1636,6 +1699,14 @@ const handleMqttMessage = (topic, messageData) => {
         contentType: chatData.contentType || 1,
         content: chatData.content,
         sendTime: chatData.sendTime,
+        messageType: chatData.messageType,
+        businessType: chatData.businessType,
+        businessId: chatData.businessId,
+        issueMessageType: chatData.issueMessageType,
+        tabType: chatData.tabType,
+        viewMode: chatData.viewMode,
+        extra: chatData.extra,
+        url: chatData.url,
         status: 1,
         isSelf: false,
         fromUserName: chatData.fromUserName,

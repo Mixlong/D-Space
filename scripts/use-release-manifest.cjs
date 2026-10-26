@@ -7,7 +7,7 @@ const sourceFile = path.join(projectRoot, `package.${targetChannel}.json`)
 const targetFile = path.join(projectRoot, 'package.json')
 
 if (!targetChannel || !fs.existsSync(sourceFile)) {
-  console.error('用法: node scripts/use-release-manifest.cjs <transition|legacy|modern>')
+  console.error('用法: node scripts/use-release-manifest.cjs <legacy|modern>')
   process.exit(1)
 }
 

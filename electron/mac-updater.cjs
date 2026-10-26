@@ -13,8 +13,8 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const https = require('https');
-const http = require('http');
 const { execFile } = require('child_process');
+const { scheduleMacRelaunch } = require('./mac-relaunch.cjs');
 const { app } = require('electron');
 
 // 由 main.cjs 在 electron-updater 的 `update-downloaded` 事件里写入
@@ -42,61 +42,122 @@ function execAsync(cmd, args, opts = {}) {
 }
 
 /**
- * 跟随 30x 重定向下载到本地文件。
+ * 下载器同时供 Mac/Windows 字典更新使用。
+ * HTTPS、相对重定向、30 秒无响应超时、首字节进度以及异常清理。
  */
 function downloadToFile(url, filePath, onProgress, redirectCount = 0) {
   return new Promise((resolve, reject) => {
     if (redirectCount > 5) {
       return reject(new Error('重定向次数过多'));
     }
-    const lib = url.startsWith('https') ? https : http;
-    const file = fs.createWriteStream(filePath);
+    let parsed;
+    try {
+      parsed = new URL(url);
+      if (parsed.protocol !== 'https:') throw new Error('更新文件下载必须使用 HTTPS');
+    } catch (error) {
+      reject(error);
+      return;
+    }
 
-    let cleaned = false;
-    const cleanup = (err) => {
-      if (cleaned) return;
-      cleaned = true;
-      try { file.close(); } catch (e) {}
-      try { fs.unlinkSync(filePath); } catch (e) {}
-      reject(err);
+    let req = null;
+    let response = null;
+    let file = null;
+    let completed = false;
+    const clearTimers = () => {
+      clearTimeout(connectTimer);
+      clearTimeout(totalTimer);
     };
-
-    const req = lib.get(url, (res) => {
-      // 跟随重定向
-      if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
-        try { file.close(); } catch (e) {}
-        try { fs.unlinkSync(filePath); } catch (e) {}
-        return downloadToFile(res.headers.location, filePath, onProgress, redirectCount + 1)
-          .then(resolve, reject);
+    const removePartialFile = () => {
+      // Windows 上必须等待文件句柄关闭后才能删除未完成的 .part。
+      if (file && !file.closed) {
+        file.once('close', () => fs.promises.unlink(filePath).catch(() => {}));
+        file.destroy();
+      } else {
+        fs.promises.unlink(filePath).catch(() => {});
       }
-      if (res.statusCode !== 200) {
-        return cleanup(new Error(`下载失败，状态码 ${res.statusCode}`));
-      }
+    };
+    const fail = (error) => {
+      if (completed) return;
+      completed = true;
+      clearTimers();
+      if (req) req.destroy();
+      if (response) response.destroy();
+      removePartialFile();
+      reject(error);
+    };
+    const connectTimer = setTimeout(
+      () => fail(new Error('连接更新服务器超时（30 秒），请检查网络或下载地址')),
+      30000
+    );
+    const totalTimer = setTimeout(
+      () => fail(new Error('更新包下载超时，请重新下载')),
+      15 * 60 * 1000
+    );
 
-      const total = parseInt(res.headers['content-length'], 10) || 0;
-      let downloaded = 0;
-      let lastReported = 0;
-
-      res.on('data', (chunk) => {
-        downloaded += chunk.length;
-        if (onProgress && total) {
-          // 节流：每 1% 上报一次
-          const percent = (downloaded / total) * 100;
-          if (percent - lastReported >= 1 || percent >= 100) {
-            lastReported = percent;
-            try { onProgress({ downloaded, total, percent }); } catch (e) {}
+    try {
+      req = https.get(parsed, (res) => {
+        response = res;
+        clearTimeout(connectTimer);
+        if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+          let next;
+          try {
+            next = new URL(res.headers.location, parsed);
+            if (next.protocol !== 'https:') throw new Error('更新地址重定向到了不安全的链接');
+          } catch (error) {
+            fail(error);
+            return;
           }
+          res.resume();
+          completed = true;
+          clearTimers();
+          downloadToFile(next.href, filePath, onProgress, redirectCount + 1).then(resolve, reject);
+          return;
         }
-      });
+        if (res.statusCode !== 200) {
+          fail(new Error(`下载失败，服务器返回 HTTP ${res.statusCode}`));
+          return;
+        }
 
-      res.pipe(file);
-      file.on('finish', () => {
-        file.close((err) => (err ? cleanup(err) : resolve()));
+        const total = Number(res.headers['content-length']) || 0;
+        let downloaded = 0;
+        let lastReportedBytes = 0;
+        let lastReportedPercent = 0;
+        file = fs.createWriteStream(filePath);
+        file.on('error', fail);
+        res.on('error', fail);
+        res.on('aborted', () => fail(new Error('更新服务器中断了下载连接')));
+        res.on('data', (chunk) => {
+          downloaded += chunk.length;
+          const percent = total > 0 ? Math.min(100, downloaded / total * 100) : 0;
+          if (onProgress && (lastReportedBytes === 0 || downloaded - lastReportedBytes >= 256 * 1024 ||
+              (total > 0 && percent - lastReportedPercent >= 1))) {
+            lastReportedBytes = downloaded;
+            lastReportedPercent = percent;
+            try { onProgress({ downloaded, total, percent }); } catch (error) {}
+          }
+        });
+        res.pipe(file);
+        file.on('finish', () => {
+          file.close((error) => {
+            if (error) return fail(error);
+            if (!downloaded || (total > 0 && downloaded !== total)) {
+              return fail(new Error('更新包未完整下载，请重新下载'));
+            }
+            if (completed) return;
+            completed = true;
+            clearTimers();
+            if (onProgress) {
+              try { onProgress({ downloaded, total, percent: 100 }); } catch (error) {}
+            }
+            resolve();
+          });
+        });
       });
-      res.on('error', cleanup);
-    });
-
-    req.on('error', cleanup);
+      req.setTimeout(30000, () => req.destroy(new Error('更新服务器 30 秒没有数据响应')));
+      req.on('error', fail);
+    } catch (error) {
+      fail(error);
+    }
   });
 }
 
@@ -235,25 +296,22 @@ async function performSilentInstall(opts = {}) {
     throw e;
   }
 
-  // 8. 异步删除备份和临时解压目录（不影响主流程，失败也无所谓）
-  setTimeout(() => {
-    execFile('/bin/rm', ['-rf', backupPath], () => {});
-    execFile('/bin/rm', ['-rf', extractDir], () => {});
-  }, 0);
-
-  // 9. 重启
-  logger('[MacUpdater] 即将重启应用以加载新版本');
+  // 不在旧 .app 仍运行时就清理备份、直接 app.relaunch()。
+  // 否则首次启动可能与旧进程退出/Helper 释放资源并发，出现空白窗口。
+  logger('[MacUpdater] 等待旧进程退出后从新版 .app 启动');
   onProgress({ downloaded: 0, total: 0, percent: 100, phase: 'relaunching' });
-
-  // 给前端一点时间显示"重启中"的提示
-  setTimeout(() => {
-    app.relaunch();
-    app.exit(0);
-  }, 500);
+  const helperPid = await scheduleMacRelaunch({
+    appPath: currentAppPath,
+    backupPath,
+    extractDir,
+  });
+  logger('[MacUpdater] 已启动独立重启助手 pid=' + helperPid + '，退出旧应用');
+  app.exit(0);
 }
 
 module.exports = {
   setDownloadedFile,
   getDownloadedFile,
+  downloadToFile,
   performSilentInstall,
 };

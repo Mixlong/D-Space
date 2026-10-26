@@ -1,12 +1,5 @@
 <template>
   <div class="ditai-cloud-container">
-    <!-- 加载状态提示 -->
-    <div v-if="isLoading" class="loading-overlay">
-      <div class="loading-spinner"></div>
-      <p>{{ userStore.token ? '正在加载运营管理平台...' : '正在等待登录状态...' }}</p>
-      <span class="loading-time" v-if="loadingSeconds > 0">已等待 {{ loadingSeconds }} 秒</span>
-      <span class="loading-hint" v-if="loadingSeconds >= 10">网络较慢，请稍候...</span>
-    </div>
     <!-- 加载失败提示 -->
     <div v-if="loadError" class="error-overlay">
       <p>⚠️ 页面加载失败</p>
@@ -17,7 +10,7 @@
     <iframe 
       ref="iframeRef"
       class="cloud-webview"
-      :class="{ 'iframe-hidden': isLoading || loadError }"
+      :class="{ 'iframe-hidden': loadError }"
       frameborder="0"
       loading="lazy"
       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -36,11 +29,14 @@ export default {
 <script setup>
 import { ref, onMounted, onActivated, onDeactivated, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { buildUrlWithToken } from '@/utils/linkOpener'
+import { buildConfiguredWebviewUrl } from '@/utils/webviewMenu'
+import { buildUrlWithToken, buildUrlWithParams } from '@/utils/linkOpener'
+import usePermissionStore from '@/store/modules/permission'
 import useUserStore from '@/store/modules/user'
 
 const route = useRoute()
 const userStore = useUserStore()
+const permissionStore = usePermissionStore()
 const cloudUrl = ref('')
 const iframeRef = ref(null)
 const cacheBustToken = ref(Date.now().toString())
@@ -120,7 +116,7 @@ const startLoadTimeout = () => {
   
   // 设置新的超时计时器
   loadTimeout.value = setTimeout(() => {
-    // 如果仍在加载中，说明超时了
+    // 如果加载未完成，说明超时了
     if (isLoading.value && !loadError.value) {
       console.warn('[迪太云管理] ⏰ 加载超时，尝试重新加载...')
       
@@ -197,39 +193,25 @@ const getCloudBaseUrl = () => {
   if (isDev) {
   return import.meta.env.VITE_APP_DIGI_CLOUD_URL  
   } else {
-    return import.meta.env.VITE_APP_DIGI_CLOUD_URL || 'http://cloud.riding-evolved.com/digiSmart/redirect'
+    return import.meta.env.VITE_APP_DIGI_CLOUD_URL || 'https://cloud.riding-evolved.com/digiSmart/redirect'
   }
 }
 
 // 加载 URL
 const loadUrl = (options = {}) => {
   const { forceRefresh = false } = options
-  const urlFromQuery = route.query.url
-  let targetUrl = getCloudBaseUrl()
-  
-  // 如果有路由参数，替换域名但保留路径和参数
-  if (urlFromQuery) {
-    try {
-      const envBaseUrl = new URL(getCloudBaseUrl())
-      const queryUrl = new URL(urlFromQuery)
-      
-      // 使用环境配置的域名 + 传入的路径和参数
-      targetUrl = envBaseUrl.origin + queryUrl.pathname + queryUrl.search + queryUrl.hash
-      console.log('[迪太云管理] 🔄 替换域名:', {
-        原始URL: urlFromQuery,
-        环境域名: envBaseUrl.origin,
-        最终URL: targetUrl
-      })
-    } catch (e) {
-      console.warn('[迪太云管理] ⚠️ URL 解析失败，使用默认URL:', e)
-      targetUrl = getCloudBaseUrl()
-    }
-  }
+  const { config: webviewConfig, targetUrl } = buildConfiguredWebviewUrl({
+    route,
+    menuConfig: permissionStore.menuConfig,
+    defaultUrl: getCloudBaseUrl(),
+    normalizeQueryUrlToDefaultOrigin: true
+  })
   
   console.log('[迪太云管理] 📍 开始加载 URL:', targetUrl)
+  console.log('[迪太云管理] 📍 WebView配置:', webviewConfig)
   console.log('[迪太云管理] 📍 路由参数:', route.query)
   
-  if (!userStore.token) {
+  if (!userStore.token && webviewConfig.appendToken !== false) {
     console.error('[迪太云管理] ⚠️ token 为空！')
     isLoading.value = true
     loadError.value = false
@@ -241,11 +223,13 @@ const loadUrl = (options = {}) => {
     cacheBustToken.value = nextCacheBustToken
   }
 
-  const nextUrl = buildUrlWithToken(targetUrl, userStore.token, {
-    paramName: 'ddsToken',
-    stripBearer: true,
-    extraParams: { _t: nextCacheBustToken }
-  })
+  const nextUrl = webviewConfig.appendToken === false
+    ? buildUrlWithParams(targetUrl, { _t: nextCacheBustToken })
+    : buildUrlWithToken(targetUrl, userStore.token, {
+        paramName: webviewConfig.tokenParamName || 'ddsToken',
+        stripBearer: webviewConfig.stripBearer !== false,
+        extraParams: { _t: nextCacheBustToken }
+      })
   
   // 检查当前 iframe 的 src 是否已经是目标 URL
   const currentSrc = iframeRef.value?.src || ''
@@ -352,7 +336,6 @@ watch(() => route.query.url, (newUrl, oldUrl) => {
     }
   }
   
-  .loading-overlay,
   .error-overlay {
     position: absolute;
     top: 0;
@@ -372,32 +355,11 @@ watch(() => route.query.url, (newUrl, oldUrl) => {
       font-size: 14px;
     }
     
-    .loading-time {
-      margin-top: 8px;
-      color: #909399;
-      font-size: 12px;
-    }
-    
-    .loading-hint {
-      margin-top: 4px;
-      color: #e6a23c;
-      font-size: 12px;
-    }
-    
     .error-hint {
       margin-top: 8px;
       color: #909399;
       font-size: 12px;
     }
-  }
-  
-  .loading-spinner {
-    width: 40px;
-    height: 40px;
-    border: 3px solid #e4e7ed;
-    border-top-color: #409eff;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
   }
   
   .error-overlay {
@@ -416,10 +378,5 @@ watch(() => route.query.url, (newUrl, oldUrl) => {
     }
   }
   
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
 }
 </style>

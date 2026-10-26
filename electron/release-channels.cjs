@@ -37,7 +37,7 @@ const CHANNELS = {
 }
 
 const DEFAULT_CHANNEL = 'modern'
-const OSS_HOST = 'https://bikewise.oss-cn-shenzhen.aliyuncs.com'
+const OSS_HOST = 'https://file.riding-evolved.com'
 
 function normalizeReleaseChannel(channel) {
   if (!channel) return null

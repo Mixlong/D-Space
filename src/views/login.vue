@@ -226,6 +226,7 @@ import { initMqtt } from '@/plugins/mqtt'
 import { CaretBottom } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { setToken } from '@/utils/auth'
+import { updateIamFromResponse } from '@/utils/iam'
 import WindowControls from '@/components/WindowControls'
 
 const title = import.meta.env.VITE_APP_TITLE
@@ -419,26 +420,32 @@ function submitSmsCode() {
   codeForm.value.password = loginForm.value.password
   
   getSmsVerify(codeForm.value)
-    .then((res) => {
-      const { token } = res.data
-      setToken(token)
-      
-      // 如果有其他认证信息，也保存（使用 localStorage 兼容 Electron）
-      if (res.data.iamKey && res.data.iamValue) {
-        localStorage.setItem('iamKeys', res.data.iamKey)  // 修复：保存键名而不是键值
-        localStorage.setItem('iamValue', res.data.iamValue)
+    .then(async (res) => {
+      // 短信验证可能返回 Token，也可能仅签发新 IAM；先保存 IAM 再进行后续登录。
+      const receivedNewIam = await updateIamFromResponse(res)
+      const result = res?.data?.data || res?.data || res
+      const token = result?.token || res?.data?.token || res?.token
+
+      if (token) {
+        setToken(token)
+        userStore.token = token
+      } else if (receivedNewIam) {
+        // 仅收到新 IAM 时，直接使用新 IAM 登录换取 Token，不要求再发一次短信验证码。
+        await userStore.login(loginForm.value)
+        if (!userStore.token) {
+          throw new Error('短信验证后登录未返回有效 Token')
+        }
+      } else {
+        throw new Error('短信验证响应未返回 Token 或新的 IAM')
       }
-      
-      ElMessage({
-        message: '登录成功',
-        type: 'success'
-      })
-      
-      // 关闭短信验证对话框
+
+      if (!receivedNewIam) {
+        console.warn('[Login] 短信验证响应没有新 IAM，继续使用当前保存的 IAM')
+      }
+      ElMessage({ message: '登录成功', type: 'success' })
       isCodeDiag.value = false
-      isCodeLoading.value = false
-      
-      // 跳转到首页，让路由守卫自动处理用户信息获取和MQTT初始化
+
+      // 确认 Token 生效后才跳转，避免路由守卫用旧 Token 导致重复验证
       const query = route.query
       const otherQueryParams = Object.keys(query).reduce((acc, cur) => {
         if (cur !== "redirect") {
@@ -448,7 +455,15 @@ function submitSmsCode() {
       }, {})
       router.push({ path: redirect.value || '/my-todo', query: otherQueryParams })
     })
-    .catch(() => {
+    .catch((err) => {
+      if (err === 40010) {
+        ElMessage.error('新 IAM 未通过登录校验，服务端仍要求二次验证')
+      } else if (err instanceof Error && /短信验证/.test(err.message)) {
+        ElMessage.error(err.message)
+      }
+      console.warn('[Login] 短信身份验证未完成登录:', err)
+    })
+    .finally(() => {
       isCodeLoading.value = false
     })
 }

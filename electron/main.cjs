@@ -1,6 +1,5 @@
 const electron = require('electron');
 const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, Notification, dialog, shell, session } = electron;
-const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const url = require('url');
 const fs = require('fs');
@@ -10,7 +9,10 @@ const packageJson = require('../package.json');
 // 因为项目 package.json 设了 "type": "module"，.js 文件会被当作 ESM，
 // CommonJS 的 main.cjs 无法 require() 一个 ESM 模块。
 const macUpdater = require('./mac-updater.cjs');
+const { createDictUpdater } = require('./dict-updater.cjs');
+const { createStartupGuard } = require('./startup-guard.cjs');
 const { getReleaseChannelConfig, normalizeReleaseChannel } = require('./release-channels.cjs');
+const { createIamStorage } = require('./iam-storage.cjs');
 const {
   getExpectedReleaseChannel,
   getMacHardwareAccelerationPolicy,
@@ -21,6 +23,7 @@ const {
 // 设置应用名称（保持与之前版本一致，避免数据丢失）
 // 注意：这会影响 userData 路径，修改后会导致无法访问旧数据
 app.setName('DigiSmart');
+const iamStorage = createIamStorage({ app, safeStorage: electron.safeStorage });
 
 const configuredReleaseChannel = normalizeReleaseChannel(
   process.env.RELEASE_CHANNEL || packageJson.releaseChannel
@@ -55,6 +58,29 @@ function buildChromeLikeUserAgent() {
 const chromeLikeUserAgent = buildChromeLikeUserAgent()
 app.userAgentFallback = chromeLikeUserAgent
 
+const MAIN_WINDOW_DEFAULT_WIDTH = 1920
+const MAIN_WINDOW_DEFAULT_HEIGHT = 1080
+const MAIN_WINDOW_MIN_WIDTH = 1200
+const MAIN_WINDOW_MIN_HEIGHT = 700
+const MAIN_WINDOW_SCREEN_RATIO = 0.92
+
+function getDefaultMainWindowSize() {
+  const { width: screenWidth, height: screenHeight } = electron.screen.getPrimaryDisplay().workAreaSize
+
+  return {
+    width: Math.min(
+      MAIN_WINDOW_DEFAULT_WIDTH,
+      Math.max(MAIN_WINDOW_MIN_WIDTH, Math.floor(screenWidth * MAIN_WINDOW_SCREEN_RATIO)),
+      screenWidth
+    ),
+    height: Math.min(
+      MAIN_WINDOW_DEFAULT_HEIGHT,
+      Math.max(MAIN_WINDOW_MIN_HEIGHT, Math.floor(screenHeight * MAIN_WINDOW_SCREEN_RATIO)),
+      screenHeight
+    )
+  }
+}
+
 if (macHardwareAccelerationPolicy.disableHardwareAcceleration) {
   app.disableHardwareAcceleration();
 }
@@ -68,19 +94,6 @@ console.log('[Release] 当前系统建议发布线:', expectedReleaseChannel);
 console.log('[Release] 当前发布线是否受支持:', isCurrentChannelSupported);
 console.log('[MacCompat] 硬件加速策略:', macHardwareAccelerationPolicy);
 console.log('[UA] 当前 User-Agent:', chromeLikeUserAgent);
-
-// 配置自动更新
-autoUpdater.autoDownload = true; // 自动下载更新
-autoUpdater.autoInstallOnAppQuit = true; // 退出时自动安装
-
-// 设置更新服务器地址（显式配置）
-if (process.env.NODE_ENV !== 'development' && isCurrentChannelSupported) {
-  autoUpdater.setFeedURL({
-    provider: 'generic',
-    // 新的更新服务器目录（必须与 scripts/upload-to-oss.cjs 的上传路径完全一致）
-    url: releaseChannel.feedUrl
-  });
-}
 
 // 日志文件路径
 const logFilePath = path.join(app.getPath('userData'), 'update-log.txt');
@@ -101,6 +114,9 @@ function buildRuntimeInfoSnapshot() {
   return {
     configuredReleaseChannel: configuredReleaseChannel || 'modern',
     activeReleaseChannel: releaseChannel.id,
+    feedUrl: releaseChannel.feedUrl,
+    // 明确标识支持按字典配置下载，供新前端识别旧客户端。
+    updateTransport: 'dict-v1',
     expectedReleaseChannel,
     isCurrentChannelSupported,
     hardwareAccelerationEnabled: !macHardwareAccelerationPolicy.disableHardwareAcceleration,
@@ -119,6 +135,7 @@ function buildRuntimeInfoSnapshot() {
 }
 
 let mainWindow;
+let mainWindowStartupGuard = null;
 let tray = null;
 let notificationWindow = null; // 通知浮窗
 let notificationQueue = []; // 通知队列
@@ -294,13 +311,14 @@ function buildTrayIcon() {
 function createWindow() {
   // 关闭默认菜单（在应用就绪后）
   // Menu.setApplicationMenu(null); // 注释以保留刷新等快捷键
+  const defaultWindowSize = getDefaultMainWindowSize()
   
   // 创建浏览器窗口
   mainWindow = new BrowserWindow({
-    width: 1600,
-    height: 900,
-    minWidth: 1200,
-    minHeight: 700,
+    width: defaultWindowSize.width,
+    height: defaultWindowSize.height,
+    minWidth: Math.min(MAIN_WINDOW_MIN_WIDTH, defaultWindowSize.width),
+    minHeight: Math.min(MAIN_WINDOW_MIN_HEIGHT, defaultWindowSize.height),
     frame: false, // 移除窗口标题栏
     title: 'D-Space',
     icon: getBrowserWindowIcon(),
@@ -331,19 +349,61 @@ function createWindow() {
         slashes: true
       });
 
-  mainWindow.loadURL(startUrl);
-
-  // 监听页面加载完成
-  mainWindow.webContents.on('did-finish-load', () => {
-    // 页面加载完成后显示窗口
-    mainWindow.show();
-    mainWindow.focus();
-    console.log('[Window] 页面加载完成，显示窗口');
-    
+  // Electron 的 did-finish-load 只说明 HTML 已加载，不能说明 Vue/IAM/路由就绪。
+  // 先显示 index.html 内的启动界面，收到渲染进程握手后才真正完成启动。
+  const currentWindow = mainWindow;
+  const startupGuard = createStartupGuard({
+    logger: writeLog,
+    onRetry: () => {
+      if (!currentWindow.isDestroyed()) currentWindow.webContents.reloadIgnoringCache();
+    },
+    onFailure: (reason) => {
+      if (currentWindow.isDestroyed()) return;
+      currentWindow.show();
+      dialog.showMessageBox(currentWindow, {
+        type: 'warning',
+        title: 'D-Space 启动异常',
+        message: '应用页面未能完成初始化',
+        detail: '已尝试自动恢复，但页面仍未就绪。可以重新加载，不需要卸载应用或清除登录数据。错误代码：' + reason,
+        buttons: ['重新加载', '退出应用'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+      }).then(({ response }) => {
+        if (currentWindow.isDestroyed()) return;
+        if (response === 0) {
+          startupGuard.retry();
+          currentWindow.webContents.reloadIgnoringCache();
+        } else {
+          app.isQuitting = true;
+          app.quit();
+        }
+      }).catch((error) => writeLog('[启动] 显示恢复提示失败: ' + error.message));
+    },
+  });
+  mainWindowStartupGuard = startupGuard;
+  currentWindow.webContents.on('did-finish-load', () => {
+    if (currentWindow.isDestroyed()) return;
+    currentWindow.show();
+    currentWindow.focus();
+    writeLog('[启动] HTML 加载完成，等待 Vue/初始路由就绪');
     if (process.env.NODE_ENV === 'development') {
-      mainWindow.webContents.openDevTools();
-      console.log('[DevTools] 页面加载完成，强制打开开发者工具');
+      currentWindow.webContents.openDevTools();
     }
+  });
+  currentWindow.webContents.on('did-fail-load', (_event, errorCode, description, failingUrl, isMainFrame) => {
+    if (errorCode === -3) return; // reload 导致的正常中止
+    writeLog('[启动] 页面资源加载失败: ' + errorCode + ', ' + description +
+      ', mainFrame=' + isMainFrame + ', url=' + String(failingUrl).slice(0, 260));
+  });
+  currentWindow.webContents.on('render-process-gone', (_event, details) => {
+    writeLog('[启动] 渲染进程异常退出: ' + details.reason);
+    startupGuard.fail('renderer-gone');
+  });
+  startupGuard.start();
+  currentWindow.loadURL(startUrl).catch((error) => {
+    // did-fail-load 也会记录；统一由启动监控负责恢复，避免未处理的 Promise 拒绝。
+    writeLog('[启动] loadURL 失败: ' + error.message);
   });
   
   // 监听DOM准备就绪
@@ -364,6 +424,8 @@ function createWindow() {
   });
 
   mainWindow.on('closed', () => {
+    startupGuard.stop();
+    if (mainWindowStartupGuard === startupGuard) mainWindowStartupGuard = null;
     mainWindow = null;
   });
 
@@ -535,16 +597,14 @@ app.whenReady().then(() => {
     writeLog('[更新] 应用版本: ' + app.getVersion());
     writeLog('[更新] 当前发布线: ' + releaseChannel.id);
     writeLog('[更新] 系统建议发布线: ' + expectedReleaseChannel);
-    writeLog('[更新] 更新服务器: ' + releaseChannel.feedUrl);
+    writeLog('[更新] 更新方式: 登录后读取字典 app_update_config（版本号 + 下载地址），不再使用 OSS yml');
     writeLog('[更新] 日志文件路径: ' + logFilePath);
     if (!isCurrentChannelSupported) {
       writeLog(`[更新] 当前发布线 ${releaseChannel.id} 不支持当前系统，跳过自动更新检查`);
     } else {
-      // 延迟5秒后检查更新，避免影响启动速度
-      setTimeout(() => {
-        writeLog('[更新] 开始检查更新...');
-        autoUpdater.checkForUpdates();
-      }, 5000);
+      // 不在启动时检查：用户登录并拉取 getInfo 后，由渲染进程读取字典，
+      // 通过 check-for-updates-with-config 触发（字典驱动，不依赖 OSS yml）。
+      writeLog('[更新] 等待登录后由字典配置触发更新检查');
     }
   } else {
     writeLog('[更新] 开发环境，跳过自动更新检查');
@@ -589,6 +649,20 @@ app.on('activate', () => {
   }
 });
 
+// 只有主窗口的顶层文档可确认启动完成（iframe 无权伪造握手）。
+ipcMain.on('renderer-app-ready', (event) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents ||
+      event.senderFrame !== mainWindow.webContents.mainFrame) return;
+  mainWindowStartupGuard?.ready();
+});
+
+ipcMain.on('renderer-app-startup-failed', (event, message) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents ||
+      event.senderFrame !== mainWindow.webContents.mainFrame) return;
+  writeLog('[启动] 渲染进程初始化失败: ' + String(message || 'unknown').slice(0, 300));
+  // 留给启动监控一次无缓存重载机会，而不是立即打断用户。
+});
+
 // 主进程与渲染进程通信
 ipcMain.on('window-minimize', () => {
   if (mainWindow) {
@@ -619,6 +693,39 @@ ipcMain.handle('is-maximized', () => {
 
 ipcMain.handle('get-runtime-info', () => {
   return buildRuntimeInfoSnapshot();
+});
+
+// 仅信任本应用主窗口的主 frame 和加载入口；外部页面不能读取 IAM。
+function verifyIamSender(event) {
+  if (!mainWindow || event.sender !== mainWindow.webContents ||
+      event.senderFrame !== mainWindow.webContents.mainFrame) {
+    throw new Error('unauthorized-iam-request');
+  }
+
+  let isTrustedOrigin = false;
+  try {
+    const pageUrl = new URL(event.senderFrame.url);
+    if (process.env.NODE_ENV === 'development') {
+      isTrustedOrigin = pageUrl.origin === 'http://localhost:8080' &&
+        (pageUrl.pathname === '/' || pageUrl.pathname === '/index.html');
+    } else if (pageUrl.protocol === 'file:') {
+      isTrustedOrigin = path.resolve(url.fileURLToPath(pageUrl)) ===
+        path.resolve(path.join(__dirname, '../dist/index.html'));
+    }
+  } catch (error) {
+    isTrustedOrigin = false;
+  }
+  if (!isTrustedOrigin) throw new Error('unauthorized-iam-origin');
+}
+
+ipcMain.handle('iam:load', async (event) => {
+  verifyIamSender(event);
+  return iamStorage.load();
+});
+
+ipcMain.handle('iam:save', async (event, credentials) => {
+  verifyIamSender(event);
+  return iamStorage.save(credentials);
 });
 
 // 清空 HTTP 缓存（含内存缓存 + 磁盘缓存）。
@@ -1694,111 +1801,72 @@ ipcMain.on('notification-confirm', (event, data) => {
   closeNotificationWindow();
 });
 
-// ==================== 自动更新事件监听 ====================
-
-autoUpdater.on('checking-for-update', () => {
-  writeLog('[更新] 正在检查更新...');
+// ==================== 自动更新（字典驱动，不依赖 OSS 的 latest.yml / electron-updater） ====================
+// 流程：登录并 getInfo 后，渲染进程读取字典 app_update_config，把「版本号 + 下载地址 + sha512」等策略交给这里；
+// 主进程比对字典版本与当前版本，有新版本则校验地址白名单、下载、校验 sha512，再由前端触发安装。
+const dictUpdater = createDictUpdater({
+  app,
+  logger: writeLog,
+  getWindow: () => mainWindow,
+  downloadToFile: macUpdater.downloadToFile,
+  macUpdater,
 });
 
-autoUpdater.on('update-available', (info) => {
-  writeLog('[更新] 发现新版本: ' + info.version);
-  writeLog('[更新] 新版本信息: ' + JSON.stringify(info));
-  // 通知渲染进程有新版本（不弹出通知，静默下载）
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('update-available', info);
-  }
-});
-
-autoUpdater.on('update-not-available', (info) => {
-  writeLog('[更新] 当前已是最新版本');
-  writeLog('[更新] 当前版本信息: ' + JSON.stringify(info));
-});
-
-autoUpdater.on('download-progress', (progressObj) => {
-  const percent = Math.round(progressObj.percent);
-  writeLog('[更新] 下载进度: ' + percent + '%');
-  // 通知渲染进程下载进度
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('download-progress', progressObj);
-  }
-});
-
-autoUpdater.on('update-downloaded', (info) => {
-  const platform = process.platform;
-  const isMac = platform === 'darwin';
-
-  // 保存 electron-updater 已下载的 zip 路径，
-  // mac-updater 静默安装时优先复用，避免重复下载。
-  // electron-updater 4.x+ 的事件 payload 里会带 downloadedFile 字段。
-  if (isMac && info && info.downloadedFile) {
-    macUpdater.setDownloadedFile(info.downloadedFile);
-    writeLog('[更新] Mac: 缓存 electron-updater 下载文件: ' + info.downloadedFile);
-  }
-
-  if (isMac) {
-    writeLog('[更新] Mac: 下载完成，等待用户确认后静默安装');
-  } else {
-    writeLog('[更新] Windows: 下载完成，自动退出并重启安装');
-  }
-  
-  // 通知渲染进程下载完成（区分平台）
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('update-downloaded', {
-      platform: platform,
-      isMac: isMac,
-      // 说明：Mac 不再强制走"手动下载"，走 mac-updater 静默替换 .app
-      supportSilentInstall: true,
-      message: isMac
-        ? '新版本已下载完成，点击立即重启安装'
-        : '新版本已下载完成，即将重启安装'
-    });
-  }
-
-  // 注意：之前这里有"800ms 后自动 quitAndInstall"的逻辑，已移除。
-  // 现在统一由前端 UpdateIndicator 控制安装时机：
-  //   1) 收到 update-downloaded 事件后，进度对话框显示 100% ~ 600ms
-  //   2) 前端自动调 install-update IPC，由主进程执行 quitAndInstall
-  // 这样用户能完整看到下载进度 + 100% 完成 + 即将重启 的视觉反馈。
-});
-
-autoUpdater.on('error', (err) => {
-  writeLog('[更新] 更新失败: ' + err.message);
-  writeLog('[更新] 错误详情: ' + err.stack);
-  
-  // 检查是否是签名问题（Mac 常见错误）
-  if (process.platform === 'darwin' && err.message.includes('code signature')) {
-    writeLog('[更新] Mac 签名错误：应用可能未签名，无法使用自动更新');
-    writeLog('[更新] 建议：使用手动下载 .dmg 文件更新，或配置代码签名');
-  }
-});
-
-// 处理渲染进程请求下载更新
-ipcMain.on('download-update', () => {
-  if (!isCurrentChannelSupported) {
-    writeLog(`[更新] 当前系统不支持 ${releaseChannel.id} 更新通道，忽略下载更新请求`);
+// 渲染进程读取字典后调用；policy 为 null 表示字典不可用（本次不检查更新）
+ipcMain.on('check-for-updates-with-config', (event, policy) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) {
     return;
   }
-  writeLog('[更新] 用户确认下载更新');
-  autoUpdater.downloadUpdate();
+  if (!isCurrentChannelSupported) {
+    const message = `当前系统不支持 ${releaseChannel.id} 更新通道`;
+    writeLog('[更新] ' + message);
+    mainWindow.webContents.send('update-install-failed', { message });
+    return;
+  }
+  dictUpdater.handlePolicy(policy).catch((err) => {
+    writeLog('[更新] 处理更新策略异常: ' + err.message);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('update-install-failed', { message: '更新检查失败：' + err.message });
+    }
+  });
+});
+
+// 兼容旧调用：只补发已有的更新状态（不会联网检查）
+ipcMain.on('check-for-updates', () => {
+  dictUpdater.resendState();
+});
+
+// 兼容旧调用：现在发现新版本后会自动下载，无需前端确认
+ipcMain.on('download-update', () => {
+  writeLog('[更新] 字典驱动更新会自动下载，忽略 download-update 请求');
 });
 
 // 处理渲染进程请求立即安装更新
-ipcMain.on('install-update', async (event, payload = {}) => {
+let windowsInstallPending = false;
+ipcMain.on('install-update', async (event) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents ||
+      event.senderFrame !== mainWindow.webContents.mainFrame) return;
   if (!isCurrentChannelSupported) {
     writeLog(`[更新] 当前系统不支持 ${releaseChannel.id} 更新通道，忽略安装更新请求`);
     return;
   }
+
+  if (!app.isPackaged) {
+    writeLog('[更新] 开发环境调试中：收到安装请求，已跳过覆盖本地 Electron.app');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('update-install-dev-done', {
+        message: '开发调试提示：已完成更新包下载校验，正式打包后将自动静默安装并重启应用'
+      });
+    }
+    return;
+  }
+
   const isMac = process.platform === 'darwin';
-  console.log('========================================');
-  console.log('[更新] 🚀 收到 install-update 消息');
-  console.log('[更新] 平台:', isMac ? 'Mac' : 'Windows');
-  writeLog('[更新] 用户确认安装更新');
+  writeLog('[更新] 用户确认安装更新，平台: ' + (isMac ? 'Mac' : 'Windows'));
 
   if (isMac) {
     // Mac：未签名应用不能用 Squirrel.Mac 的 quitAndInstall（会闪退）。
-    // 改用自管理静默安装：下载/复用 .zip → 解压 → ditto 替换正在运行的 .app → relaunch。
-    writeLog('[更新] Mac: 启动自管理静默安装流程');
-
+    // 自管理静默安装：复用已下载并校验过的 .zip → 解压 → ditto 替换正在运行的 .app → relaunch。
     const sendProgress = (data) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('mac-silent-install-progress', data);
@@ -1806,39 +1874,40 @@ ipcMain.on('install-update', async (event, payload = {}) => {
     };
 
     try {
+      // 缓存被清理时由字典更新器重新下载并按原策略校验后安装。
+      await dictUpdater.ensureDownloaded();
       await macUpdater.performSilentInstall({
         logger: writeLog,
-        downloadUrl: payload && payload.downloadUrl, // 缓存不可用时的回退下载地址
         onProgress: sendProgress,
       });
       // 不会执行到这里，performSilentInstall 内部会 app.relaunch + app.exit
     } catch (error) {
       writeLog('[更新] Mac 静默安装失败: ' + error.message);
-      console.error('[更新] Mac 静默安装失败:', error);
-
-      // 失败时通知前端，前端可以降级到原有的"手动下载"流程
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('update-install-failed', {
           message: error.message,
-          // EACCES_APP 表示当前 .app 不可写（如 /Applications 没有 admin 权限）
-          // 这种情况下用户必须走手动下载到桌面再拖回 Applications
+          // EACCES_APP 表示当前 .app 不可写（如 /Applications 没有 admin 权限），需走手动下载
           useManualDownload: error.code === 'EACCES_APP',
           errorCode: error.code || null,
         });
       }
     }
   } else {
-    writeLog('[更新] Windows: 退出并自动静默安装');
-    console.log('[更新] Windows: 调用 autoUpdater.quitAndInstall(true, true)');
-    // Windows: 静默退出并安装（/S 参数跳过 NSIS wizard）
+    if (windowsInstallPending) {
+      writeLog('[更新] Windows 安装请求正在处理中，忽略重复点击');
+      return;
+    }
+    windowsInstallPending = true;
     try {
-      autoUpdater.quitAndInstall(true, true);
-      console.log('[更新] Windows: quitAndInstall 调用成功');
+      await dictUpdater.ensureDownloaded();
+      await dictUpdater.installWindows();
+      writeLog('[更新] Windows 安装程序已启动，退出旧版本，等待 NSIS 安装并启动新版本');
+      // 托盘主窗口 close 会转隐藏；必须明确进入退出状态。
+      app.isQuitting = true;
+      app.quit();
     } catch (error) {
-      console.error('[更新] Windows: quitAndInstall 调用失败:', error);
-      writeLog('[更新] 错误: ' + error.message);
-
-      // 通知前端安装失败
+      windowsInstallPending = false;
+      writeLog('[更新] Windows 静默安装失败: ' + error.message);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('update-install-failed', {
           message: error.message
@@ -1846,17 +1915,6 @@ ipcMain.on('install-update', async (event, payload = {}) => {
       }
     }
   }
-  console.log('========================================');
-});
-
-// 手动触发检查更新（用于测试）
-ipcMain.on('check-for-updates', () => {
-  if (!isCurrentChannelSupported) {
-    writeLog(`[更新] 当前系统不支持 ${releaseChannel.id} 更新通道，忽略手动检查更新请求`);
-    return;
-  }
-  writeLog('[更新] 手动触发检查更新');
-  autoUpdater.checkForUpdates();
 });
 
 // 手动下载更新文件（Mac 备用方案）

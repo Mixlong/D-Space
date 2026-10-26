@@ -1,7 +1,5 @@
 <template>
   <router-view />
-  <!-- 更新通知弹框 -->
-  <UpdateNoticeDialog ref="updateNoticeDialogRef" />
 </template>
 
 <script setup>
@@ -10,7 +8,6 @@ import useSettingsStore from '@/store/modules/settings'
 import useUserStore from '@/store/modules/user'
 import { handleThemeStyle } from '@/utils/theme'
 import { initMqtt, disconnectMqtt } from '@/plugins/mqtt'
-import UpdateNoticeDialog from '@/components/UpdateNoticeDialog/index.vue'
 
 const userStore = useUserStore()
 

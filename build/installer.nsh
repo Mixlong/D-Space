@@ -11,23 +11,9 @@
   ${EndIf}
 !macroend
 
-; 安装前 - 自动关闭正在运行的程序
+; electron-builder 自带 CHECK_APP_RUNNING 在复制文件前处理旧进程。
+; customInstall 在文件复制后执行，不可再次杀进程以免干扰重启。
 !macro customInstall
-  ; 查找并关闭正在运行的程序（同时兼容新旧 exe 名）
-  ${nsProcess::FindProcess} "D-Space.exe" $R0
-  ${If} $R0 == 0
-    DetailPrint "检测到 D-Space 正在运行，正在关闭..."
-    ${nsProcess::KillProcess} "D-Space.exe" $R0
-    Sleep 1000
-  ${EndIf}
-
-  ${nsProcess::FindProcess} "DigiSmart.exe" $R0
-  ${If} $R0 == 0
-    DetailPrint "检测到 DigiSmart 正在运行，正在关闭..."
-    ${nsProcess::KillProcess} "DigiSmart.exe" $R0
-    Sleep 1000
-  ${EndIf}
-
   ; 强制重建快捷方式，避免覆盖安装后沿用旧图标缓存
   DetailPrint "正在重建桌面和开始菜单快捷方式..."
   Delete "$DESKTOP\\D-Space.lnk"
@@ -38,16 +24,14 @@
   Delete "$SMPROGRAMS\\D-Space\\DigiSmart.lnk"
   RMDir "$SMPROGRAMS\\D-Space"
 
-  IfFileExists "$INSTDIR\\D-Space.exe" 0 +4
+  ${If} ${FileExists} "$INSTDIR\\D-Space.exe"
     CreateShortCut "$DESKTOP\\D-Space.lnk" "$INSTDIR\\D-Space.exe"
     CreateShortCut "$SMPROGRAMS\\D-Space.lnk" "$INSTDIR\\D-Space.exe"
-    Goto +5
-
-  IfFileExists "$INSTDIR\\DigiSmart.exe" 0 +3
+  ${ElseIf} ${FileExists} "$INSTDIR\\DigiSmart.exe"
     CreateShortCut "$DESKTOP\\DigiSmart.lnk" "$INSTDIR\\DigiSmart.exe"
     CreateShortCut "$SMPROGRAMS\\DigiSmart.lnk" "$INSTDIR\\DigiSmart.exe"
+  ${EndIf}
 
-  ${nsProcess::Unload}
 !macroend
 
 ; 卸载前

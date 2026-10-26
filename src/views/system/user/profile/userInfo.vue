@@ -1,5 +1,5 @@
 <template>
-   <el-form ref="userRef" :model="form" :rules="rules" label-width="80px">
+   <el-form ref="userRef" :model="form" :rules="rules" label-width="96px" status-icon>
       <el-form-item label="用户昵称" prop="nickName">
          <el-input v-model="form.nickName" maxlength="30" />
       </el-form-item>
@@ -15,9 +15,9 @@
             <el-radio value="1">女</el-radio>
          </el-radio-group>
       </el-form-item>
-      <el-form-item>
-      <el-button type="primary" @click="submit">保存</el-button>
-      <el-button type="danger" @click="close">关闭</el-button>
+      <el-form-item class="form-actions-item">
+         <el-button type="primary" class="btn-submit" @click="submit">保存修改</el-button>
+         <el-button class="btn-close" @click="close">取消</el-button>
       </el-form-item>
    </el-form>
 </template>
@@ -53,7 +53,7 @@ function submit() {
   })
 }
 
-/** 关闭按钮 */
+/** 取消按钮 */
 function close() {
   proxy.$tab.closePage()
 }
@@ -65,3 +65,155 @@ watch(() => props.user, user => {
   }
 },{ immediate: true })
 </script>
+
+<style lang="scss" scoped>
+/* 表单容器与项 */
+.el-form {
+  width: 560px;
+  max-width: 100%;
+  padding: 0;
+}
+
+:deep(.el-form-item) {
+  margin-bottom: 16px;
+  
+  .el-form-item__label {
+    justify-content: flex-start;
+    font-weight: 500;
+    color: #475569;
+    padding-right: 14px;
+    line-height: 40px;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .el-form-item__content {
+    line-height: 40px;
+  }
+}
+
+/* 输入框优化 */
+:deep(.el-input__wrapper) {
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px #d8dee8 inset;
+  min-height: 40px;
+  padding: 0 12px;
+  transition: box-shadow 0.2s ease, background-color 0.2s ease !important;
+  background-color: #ffffff;
+
+  &:hover {
+    box-shadow: 0 0 0 1px #93c5fd inset !important;
+  }
+
+  &.is-focus {
+    box-shadow: 0 0 0 1px #2563eb inset, 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
+    background-color: #ffffff;
+  }
+}
+
+/* 单选框优化 */
+:deep(.el-radio-group) {
+  display: flex;
+  gap: 10px;
+  min-height: 40px;
+
+  .el-radio {
+    margin-right: 0;
+    height: 40px;
+    min-width: 70px;
+    padding: 0 16px;
+    border-radius: 8px;
+    border: 1px solid #d8dee8;
+    transition: border-color 0.2s ease, background-color 0.2s ease;
+    background: #f8fafc;
+
+    &.is-checked {
+      border-color: #2563eb;
+      background: #eff6ff;
+      
+      .el-radio__label {
+        color: #1d4ed8;
+        font-weight: 500;
+      }
+    }
+
+    &:hover:not(.is-checked) {
+      border-color: #c0c4cc;
+      background: #f1f5f9;
+    }
+
+    .el-radio__inner {
+      transition: all 0.2s ease;
+    }
+  }
+}
+
+/* 按钮组优化 */
+.form-actions-item {
+  margin-top: 8px;
+  margin-bottom: 0;
+  
+  :deep(.el-form-item__content) {
+    margin-left: 96px !important;
+    gap: 12px;
+    display: flex;
+  }
+}
+
+.btn-submit,
+.btn-close {
+  min-width: 92px;
+  height: 38px;
+  border-radius: 8px;
+  font-weight: 500;
+  transition: color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.btn-submit {
+  border: none;
+  background: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.18);
+
+  &:hover,
+  &:focus {
+    background: #1d4ed8;
+    color: #ffffff;
+  }
+}
+
+.btn-close {
+  border-color: #d8dee8;
+  background: #ffffff;
+  color: #475569;
+
+  &:hover,
+  &:focus {
+    border-color: #bfdbfe;
+    background: #eff6ff;
+    color: #1d4ed8;
+  }
+}
+
+@media (max-width: 768px) {
+  :deep(.el-form-item) {
+    display: block;
+
+    .el-form-item__label {
+      display: block;
+      width: auto !important;
+      margin-bottom: 6px;
+      text-align: left;
+      line-height: 1.4;
+    }
+
+    .el-form-item__content {
+      margin-left: 0 !important;
+    }
+  }
+
+  .form-actions-item :deep(.el-form-item__content) {
+    margin-left: 0 !important;
+  }
+}
+</style>

@@ -1,8 +1,8 @@
-import { createApp } from 'vue'
+import { createApp, nextTick } from 'vue'
 
 import Cookies from 'js-cookie'
 
-import ElementPlus from 'element-plus'
+import ElementPlus, { ElMessage } from 'element-plus'
 import 'element-plus/dist/index.css'
 // import 'element-plus/theme-chalk/dark/css-vars.css' // 已禁用深色模式
 import locale from 'element-plus/es/locale/lang/zh-cn'
@@ -18,6 +18,7 @@ import directive from './directive' // directive
 import plugins from './plugins' // plugins
 import mqttPlugin from './plugins/mqtt' // MQTT插件
 import { download } from '@/utils/request'
+import { initializeIam } from '@/utils/iam'
 
 // svg图标
 import 'virtual:svg-icons-register'
@@ -67,23 +68,51 @@ app.component('ImagePreview', ImagePreview)
 app.component('RightToolbar', RightToolbar)
 app.component('Editor', Editor)
 
-app.use(router)
-app.use(store)
-app.use(plugins)
-app.use(mqttPlugin) // 注册MQTT插件
-app.use(elementIcons)
-app.component('svg-icon', SvgIcon)
+// 必须先恢复文件中的 IAM，再启动路由守卫及接口请求。
+async function mountApplication() {
+  let iamStatus
+  try {
+    iamStatus = await initializeIam()
+  } catch (error) {
+    console.error('[IAM] 启动恢复失败:', error)
+    iamStatus = { ok: false, warning: 'IAM 恢复失败，可能需要重新完成身份验证' }
+  }
 
-// 将 router 挂载到 window 对象，供 MQTT 客户端使用
-window.$router = router
+  window.addEventListener('iam-storage-write-failed', () => {
+    ElMessage.warning('IAM 已用于当前登录，但加密文件保存失败；下次启动可能需要重新验证')
+  })
 
-directive(app)
+  app.use(router)
+  app.use(store)
+  app.use(plugins)
+  app.use(mqttPlugin) // 注册MQTT插件
+  app.use(elementIcons)
+  app.component('svg-icon', SvgIcon)
 
-// 使用element-plus 并且设置全局的大小
-app.use(ElementPlus, {
-  locale: locale,
-  // 支持 large、default、small
-  size: Cookies.get('size') || 'default'
+  // 将 router 挂载到 window 对象，供 MQTT 客户端使用
+  window.$router = router
+
+  directive(app)
+
+  // 使用element-plus 并且设置全局的大小
+  app.use(ElementPlus, {
+    locale: locale,
+    // 支持 large、default、small
+    size: Cookies.get('size') || 'default'
+  })
+
+  app.mount('#app')
+  if (iamStatus?.ok === false) {
+    console.warn('[IAM] 恢复失败（不弹窗，仅记录日志）:', iamStatus.warning)
+  }
+
+  // 页面挂载不代表异步路由已完成。等初始导航和 UI 刷新之后再允许关闭启动监控。
+  await router.isReady()
+  await nextTick()
+  window.electronAPI?.notifyAppReady?.()
+}
+
+mountApplication().catch((error) => {
+  console.error('[启动] Vue 初始化失败:', error)
+  window.electronAPI?.reportAppStartupFailed?.(error?.message || 'startup failed')
 })
-
-app.mount('#app')

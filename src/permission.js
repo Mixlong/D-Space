@@ -9,6 +9,7 @@ import useUserStore from '@/store/modules/user'
 import useSettingsStore from '@/store/modules/settings'
 import usePermissionStore from '@/store/modules/permission'
 import { initMqtt } from '@/plugins/mqtt'
+import { startAppUpdateChecks } from '@/utils/appUpdate'
 
 NProgress.configure({ showSpinner: false })
 
@@ -37,6 +38,7 @@ router.beforeEach((to, from, next) => {
 
           // 用户信息获取成功后，初始化MQTT长连接
           console.log('[Permission] 用户信息加载完成，初始化MQTT连接...')
+          startAppUpdateChecks() // getInfo 成功后读取字典策略并检查自动更新（后台静默）
           initMqtt().catch(error => {
             console.error('[Permission] MQTT初始化失败:', error)
           })

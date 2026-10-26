@@ -5,7 +5,6 @@ const projectRoot = path.join(__dirname, '..')
 const nextVersion = String(process.argv[2] || '').trim()
 const targetFiles = [
   'package.json',
-  'package.transition.json',
   'package.legacy.json',
   'package.modern.json',
 ]

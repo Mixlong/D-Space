@@ -18,8 +18,8 @@
         v-model="selectedUser"
         placeholder="请选择接办人"
         class="user-select"
-        :teleported="false"
         filterable
+        popper-class="assign-user-select-popper"
       >
         <el-option
           v-for="user in userList"
@@ -210,8 +210,10 @@ onMounted(() => {
   }
 }
 
-// 下拉选项样式
-:deep(.el-select-dropdown) {
+</style>
+
+<style lang="scss">
+.assign-user-select-popper {
   border-radius: 8px;
   box-shadow: 0px 2px 10px 0px rgba(0, 0, 0, 0.25);
   border: none;

@@ -161,6 +161,22 @@ export const constantRoutes = [
     ]
   },
   {
+    path: '/issue-tracking',
+    component: Layout,
+    children: [
+      {
+        path: '',
+        name: 'IssueTracking',
+        component: () => import('@/views/issueTracking/index'),
+        meta: {
+          title: '问题反馈',
+          icon: 'issue-tracking',
+          noCache: true
+        }
+      }
+    ]
+  },
+  {
     path: '/document-process',
     component: Layout,
     children: [
@@ -176,7 +192,6 @@ export const constantRoutes = [
       }
     ]
   },
- 
   {
     path: '/user',
     component: Layout,

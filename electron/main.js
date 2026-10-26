@@ -8,6 +8,7 @@ const {
   Notification,
   shell,
   session,
+  screen,
 } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("path");
@@ -68,7 +69,7 @@ autoUpdater.autoInstallOnAppQuit = true; // 退出时自动安装
 if (process.env.NODE_ENV !== "development") {
   autoUpdater.setFeedURL({
     provider: "generic",
-    url: "https://bikewise.oss-cn-shenzhen.aliyuncs.com/d-space/digismart-desktop",
+    url: "https://file.riding-evolved.com/d-space/digismart-desktop",
   });
 }
 
@@ -96,13 +97,39 @@ let trayFlashing = false; // 托盘是否正在闪烁
 let notificationMessage = null; // 通知消息内容（对象或字符串）
 let lastNotificationTime = 0; // 上次显示通知的时间戳（用于防抖）
 
+const MAIN_WINDOW_DEFAULT_WIDTH = 1920;
+const MAIN_WINDOW_DEFAULT_HEIGHT = 1080;
+const MAIN_WINDOW_MIN_WIDTH = 1200;
+const MAIN_WINDOW_MIN_HEIGHT = 700;
+const MAIN_WINDOW_SCREEN_RATIO = 0.92;
+
+function getDefaultMainWindowSize() {
+  const { width: screenWidth, height: screenHeight } =
+    screen.getPrimaryDisplay().workAreaSize;
+
+  return {
+    width: Math.min(
+      MAIN_WINDOW_DEFAULT_WIDTH,
+      Math.max(MAIN_WINDOW_MIN_WIDTH, Math.floor(screenWidth * MAIN_WINDOW_SCREEN_RATIO)),
+      screenWidth
+    ),
+    height: Math.min(
+      MAIN_WINDOW_DEFAULT_HEIGHT,
+      Math.max(MAIN_WINDOW_MIN_HEIGHT, Math.floor(screenHeight * MAIN_WINDOW_SCREEN_RATIO)),
+      screenHeight
+    ),
+  };
+}
+
 function createWindow() {
+  const defaultWindowSize = getDefaultMainWindowSize();
+
   // 创建浏览器窗口
   mainWindow = new BrowserWindow({
-    width: 1600,
-    height: 900,
-    minWidth: 1200,
-    minHeight: 700,
+    width: defaultWindowSize.width,
+    height: defaultWindowSize.height,
+    minWidth: Math.min(MAIN_WINDOW_MIN_WIDTH, defaultWindowSize.width),
+    minHeight: Math.min(MAIN_WINDOW_MIN_HEIGHT, defaultWindowSize.height),
     title: "D-Space",
     icon: path.join(__dirname, "../src/assets/logo/logo.png"),
     show: false, // 先不显示窗口，等内容加载完成后再显示
@@ -529,7 +556,7 @@ app.whenReady().then(() => {
   if (process.env.NODE_ENV !== "development") {
     writeLog("[更新] 应用版本: " + app.getVersion());
     writeLog(
-      "[更新] 更新服务器: https://bikewise.oss-cn-shenzhen.aliyuncs.com/d-space/digismart-desktop",
+      "[更新] 更新服务器: https://file.riding-evolved.com/d-space/digismart-desktop",
     );
     writeLog("[更新] 日志文件路径: " + logFilePath);
     // 延迟5秒后检查更新，避免影响启动速度

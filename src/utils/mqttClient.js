@@ -8,6 +8,71 @@ import { ElNotification } from 'element-plus'
 import { getMqttConfig, initDevice, getMqttCpuId, decryptAES, DEVICE_CONFIG, reportDeviceStatus } from '@/api/device/mqtt'
 import useMqttStore from '@/store/modules/mqtt'
 import { MQTT_MESSAGE_TYPE, handleMqttMessage, handle501Message } from './mqttMessageTypes'
+import { getBusinessLinkRouteLocation, getIssueTrackingIdFromUrl, getIssueTrackingRouteLocation, getIssueTrackingViewModeByTabType } from '@/utils/issueTracking'
+
+const ISSUE_FEEDBACK_BUSINESS_TYPE = 15
+
+const parseExtra = (extra) => {
+  if (!extra) return {}
+  if (typeof extra === 'object') return extra
+
+  try {
+    return JSON.parse(extra)
+  } catch (error) {
+    console.warn('[MQTT] 解析 extra 失败:', error)
+    return {}
+  }
+}
+
+const getActualMessageData = (data = {}) => data?.data || data || {}
+
+const getBusinessType = (data = {}) => {
+  const actualData = getActualMessageData(data)
+  const extra = parseExtra(actualData.extra)
+  return Number(extra.businessType ?? actualData.businessType)
+}
+
+const isIssueFeedbackMessage = (data = {}) => {
+  const actualData = getActualMessageData(data)
+  const extra = parseExtra(actualData.extra)
+  const routeName = String(extra.routeName || extra.name || '').toLowerCase()
+
+  return getBusinessType(actualData) === ISSUE_FEEDBACK_BUSINESS_TYPE ||
+    routeName === 'internal-issue'
+}
+
+const getIssueFeedbackRouteLocation = (data = {}) => {
+  const actualData = getActualMessageData(data)
+  const extra = parseExtra(actualData.extra)
+  const url = extra.url || actualData.url || ''
+  const id = extra.businessId ||
+    actualData.businessId ||
+    extra.id ||
+    actualData.id ||
+    getIssueTrackingIdFromUrl(url)
+  const tabType = extra.issueMessageType ||
+    actualData.issueMessageType ||
+    extra.tabType ||
+    actualData.tabType ||
+    ''
+  const viewMode = extra.viewMode || actualData.viewMode || getIssueTrackingViewModeByTabType(tabType)
+  const issueQuery = {
+    ...(tabType ? { tabType, issueMessageType: tabType } : {}),
+    ...(viewMode ? { viewMode } : {})
+  }
+
+  if (url) {
+    return getBusinessLinkRouteLocation(url, {
+      id,
+      ...issueQuery
+    })
+  }
+
+  return getIssueTrackingRouteLocation({
+    id,
+    query: issueQuery
+  })
+}
 
 class MqttClient {
   constructor() {
@@ -622,15 +687,49 @@ class MqttClient {
       
       console.log('[MQTT] 🔔 showTrayNotification - messageType:', messageType, 'typeof:', typeof messageType)
       
-      // 聊天消息（551）使用简洁的 toast 通知，3秒后自动消失
-      // 但是系统消息（fromUserId=1 或 fromUserName="系统"）不做任何通知处理
+      // 聊天消息（551）默认使用简洁 toast；问题反馈系统消息需要完整通知卡片。
       if (messageType === 551 || messageType === MQTT_MESSAGE_TYPE.CHAT_MESSAGE) {
+        const isIssueFeedback = isIssueFeedbackMessage(data)
         // 检查是否是系统消息（通过聊天渠道发送的系统通知）
         const isSystemMessage = data.fromUserId === 1 || 
                                 data.fromUserId === '1' || 
                                 data.fromUserName === '系统' ||
                                 data.fromUserName === 'admin' ||
                                 data.fromUserName === 'system'
+
+        if (isIssueFeedback) {
+          const title = '问题反馈'
+          const messageContent = data.content || processedMessage.content || '您有新的问题反馈消息'
+
+          console.log('[MQTT] 🔔 551 问题反馈通知 -', '内容:', messageContent, 'data:', data)
+
+          if (window.electronAPI.showNotificationCard) {
+            window.electronAPI.showNotificationCard({
+              title,
+              content: messageContent,
+              type: 'info',
+              buttons: [
+                { text: '稍后查看', type: 'secondary', action: 'later' },
+                { text: '立即查看', type: 'primary', action: 'view-mqtt' }
+              ],
+              autoClose: false,
+              data
+            })
+          } else if (window.electronAPI.sendNotification) {
+            window.electronAPI.sendNotification({
+              title,
+              content: messageContent,
+              time: new Date().toLocaleTimeString('zh-CN', {
+                hour: '2-digit',
+                minute: '2-digit'
+              }),
+              type: 'mqtt',
+              messageType,
+              data
+            })
+          }
+          return
+        }
         
         if (isSystemMessage) {
           // 551 系统消息不做任何通知处理，直接忽略
@@ -802,6 +901,33 @@ class MqttClient {
   }
 
   /**
+   * 跳转到问题反馈/问题跟踪页面
+   * @param {object} data - MQTT 消息数据
+   */
+  navigateToIssueFeedback(data) {
+    try {
+      const routeLocation = getIssueFeedbackRouteLocation(data)
+      console.log('[MQTT] 跳转问题反馈:', routeLocation)
+
+      const router = window.$router
+      if (router) {
+        router.push(routeLocation)
+      } else {
+        const query = new URLSearchParams(routeLocation.query || {}).toString()
+        const url = `${window.location.origin}/#${routeLocation.path}${query ? `?${query}` : ''}`
+        window.location.href = url
+        console.log('[MQTT] 使用降级方案跳转问题反馈:', url)
+      }
+
+      if (window.electronAPI && window.electronAPI.showWindow) {
+        window.electronAPI.showWindow()
+      }
+    } catch (error) {
+      console.error('[MQTT] 跳转问题反馈失败:', error)
+    }
+  }
+
+  /**
    * 处理通知点击事件
    * @param {object} messageData - 处理后的消息数据或托盘通知数据
    */
@@ -812,6 +938,12 @@ class MqttClient {
     
     // 提取数据
     const data = messageData.data || messageData
+
+    if (isIssueFeedbackMessage(data)) {
+      console.log('[MQTT] ✅ 检测到问题反馈消息，businessType:', getBusinessType(data))
+      this.navigateToIssueFeedback(data)
+      return
+    }
     
     // 检查是否为 501 推送通知（通过 businessType 和 massageType 判断）
     if (data && (data.businessType !== undefined || data.massageType !== undefined)) {

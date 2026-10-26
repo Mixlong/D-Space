@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>个人中心 - 张晓明</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --primary: rgba(20, 20, 22, 0.95);
+  --blue: rgba(0, 102, 255, 0.9);
+  --accent: rgba(120, 119, 198, 0.85);
+  --green: rgba(34, 197, 94, 0.85);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background:
+    radial-gradient(circle at 15% 85%, rgba(0, 102, 255, 0.08) 0%, transparent 45%),
+    radial-gradient(circle at 85% 15%, rgba(120, 119, 198, 0.06) 0%, transparent 50%),
+    url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><filter id="noise"><feTurbulence baseFrequency="0.9" numOctaves="3"/></filter><rect width="100%" height="100%" filter="url(%23noise)" opacity="0.025"/></svg>'),
+    #f8f9fa;
+  color: var(--primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+.sidebar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 72px;
+  height: 100vh;
+  background: linear-gradient(180deg, #0066ff 0%, #0052cc 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1.5rem 0;
+  z-index: 100;
+  box-shadow: 4px 0 24px rgba(0, 102, 255, 0.12);
+}
+
+.sidebar-logo {
+  width: 32px;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 3rem;
+  font-weight: 800;
+  color: #0066ff;
+  font-size: 1.25rem;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  flex: 1;
+}
+
+.nav-item {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.7);
+  text-decoration: none;
+  border-radius: 8px;
+  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  font-size: 0.7rem;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.nav-item:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+  transform: scale(1.08);
+}
+
+.nav-item.active {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
+.main-content {
+  margin-left: 72px;
+  padding: 2rem 3rem;
+}
+
+.header {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 1.5rem;
+  margin-bottom: 2.5rem;
+}
+
+.notification {
+  position: relative;
+  cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.notification:hover {
+  transform: scale(1.1) rotate(12deg);
+}
+
+.notification-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 16px;
+  height: 16px;
+  background: #ef4444;
+  border-radius: 50%;
+  font-size: 0.65rem;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+
+.user-dropdown {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+  padding: 0.5rem 0.75rem;
+  border-radius: 12px;
+  transition: background 0.2s ease;
+}
+
+.user-dropdown:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.user-avatar-small {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.profile-hero {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3rem;
+  margin-bottom: 3rem;
+  position: relative;
+}
+
+.profile-avatar-section {
+  position: relative;
+}
+
+.profile-avatar-wrapper {
+  position: relative;
+  width: 180px;
+  height: 180px;
+}
+
+.profile-avatar {
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 4px solid rgba(255, 255, 255, 0.9);
+  box-shadow:
+    0 12px 48px rgba(0, 102, 255, 0.15),
+    0 4px 16px rgba(0, 0, 0, 0.08);
+  position: relative;
+  z-index: 2;
+}
+
+.avatar-ring {
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(0, 102, 255, 0.3), rgba(120, 119, 198, 0.2));
+  z-index: 1;
+  animation: pulse 3s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 0.6; }
+  50% { transform: scale(1.05); opacity: 0.3; }
+}
+
+.change-avatar {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  width: 40px;
+  height: 40px;
+  background: rgba(20, 20, 22, 0.85);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 3;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  backdrop-filter: blur(10px);
+}
+
+.change-avatar:hover {
+  transform: scale(1.15) rotate(12deg);
+  background: rgba(0, 102, 255, 0.9);
+}
+
+.profile-info {
+  padding-top: 0.5rem;
+}
+
+.profile-name {
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  margin-bottom: 1.5rem;
+  background: linear-gradient(135deg, var(--primary), rgba(0, 102, 255, 0.8));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.profile-tags {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.tag {
+  padding: 0.5rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.tag-blue {
+  background: rgba(0, 102, 255, 0.12);
+  color: #0066ff;
+}
+
+.tag-green {
+  background: rgba(34, 197, 94, 0.12);
+  color: #16a34a;
+}
+
+.tag:hover {
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 8px 20px rgba(0, 102, 255, 0.15);
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2.5rem 4rem;
+  margin-bottom: 3rem;
+}
+
+.info-section {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 16px;
+  padding: 2rem;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.06),
+    0 2px 8px rgba(0, 0, 0, 0.03);
+  transform: rotate(-0.5deg);
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.info-section:nth-child(2) {
+  transform: rotate(0.5deg);
+}
+
+.info-section:hover {
+  transform: rotate(0deg) translateY(-4px);
+  box-shadow:
+    0 16px 48px rgba(0, 0, 0, 0.1),
+    0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.section-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin-bottom: 1.5rem;
+  letter-spacing: -0.01em;
+}
+
+.info-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 1rem;
+  padding: 1rem 0;
+  border-bottom: 1px dashed rgba(0, 0, 0, 0.08);
+}
+
+.info-row:last-child {
+  border-bottom: none;
+}
+
+.info-label {
+  font-size: 0.875rem;
+  color: rgba(20, 20, 22, 0.6);
+  font-weight: 500;
+}
+
+.info-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.875rem;
+  color: var(--primary);
+  font-weight: 400;
+}
+
+.tabs {
+  display: flex;
+  gap: 2rem;
+  border-bottom: 2px solid rgba(0, 0, 0, 0.06);
+  margin-bottom: 2.5rem;
+}
+
+.tab {
+  padding: 1rem 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: rgba(20, 20, 22, 0.5);
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  transition: all 0.25s ease;
+  position: relative;
+  bottom: -2px;
+}
+
+.tab:hover {
+  color: var(--blue);
+}
+
+.tab.active {
+  color: var(--blue);
+  border-bottom-color: var(--blue);
+}
+
+.form-section {
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 16px;
+  padding: 2.5rem;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.06),
+    0 2px 8px rgba(0, 0, 0, 0.03);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2rem 3rem;
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.form-row.full {
+  grid-column: 1 / -1;
+}
+
+.form-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: rgba(20, 20, 22, 0.8);
+}
+
+.form-input {
+  padding: 0.875rem 1rem;
+  border: 1.5px solid rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+  font-size: 0.9375rem;
+  font-family: 'Inter', sans-serif;
+  background: rgba(255, 255, 255, 0.8);
+  transition: all 0.25s ease;
+  color: var(--primary);
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--blue);
+  background: white;
+  box-shadow: 0 0 0 4px rgba(0, 102, 255, 0.08);
+  transform: translateY(-1px);
+}
+
+.form-input::placeholder {
+  color: rgba(20, 20, 22, 0.3);
+}
+
+.radio-group {
+  display: flex;
+  gap: 2rem;
+  align-items: center;
+}
+
+.radio-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.radio-option input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+
+.button-group {
+  display: flex;
+  justify-content: center;
+  gap: 1.5rem;
+  margin-top: 2.5rem;
+}
+
+.btn {
+  padding: 0.875rem 3rem;
+  border: none;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  font-family: 'Inter', sans-serif;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #0066ff, #0052cc);
+  color: white;
+  box-shadow: 0 4px 12px rgba(0, 102, 255, 0.25);
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 8px 24px rgba(0, 102, 255, 0.35);
+}
+
+.btn-primary:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.password-input-wrapper {
+  position: relative;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: pointer;
+  color: rgba(20, 20, 22, 0.4);
+  transition: color 0.2s ease;
+}
+
+.password-toggle:hover {
+  color: rgba(20, 20, 22, 0.7);
+}
+
+@media (max-width: 1024px) {
+  .info-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .profile-hero {
+    grid-template-columns: 1fr;
+    text-align: center;
+    justify-items: center;
+  }
+
+  .profile-info {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+}
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="sidebar-logo">⚡</div>
+  <nav class="sidebar-nav">
+    <a href="#" class="nav-item">
+      <span>🏠</span>
+      <span style="font-size: 0.6rem;">首页</span>
+    </a>
+    <a href="#" class="nav-item">
+      <span>📊</span>
+      <span style="font-size: 0.6rem;">工作台</span>
+    </a>
+    <a href="#" class="nav-item">
+      <span>📁</span>
+      <span style="font-size: 0.6rem;">项目</span>
+    </a>
+    <a href="#" class="nav-item">
+      <span>✓</span>
+      <span style="font-size: 0.6rem;">任务</span>
+    </a>
+    <a href="#" class="nav-item">
+      <span>📈</span>
+      <span style="font-size: 0.6rem;">数据</span>
+    </a>
+    <a href="#" class="nav-item">
+      <span>🔔</span>
+      <span style="font-size: 0.6rem;">消息</span>
+    </a>
+    <a href="#" class="nav-item active">
+      <span>👤</span>
+      <span style="font-size: 0.6rem;">个人</span>
+    </a>
+  </nav>
+</div>
+
+<div class="main-content">
+  <header class="header">
+    <div class="notification">
+      <span style="font-size: 1.5rem;">🔔</span>
+      <div class="notification-badge">3</div>
+    </div>
+    <div class="user-dropdown">
+      <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Crect fill='%230066ff' width='32' height='32' rx='16'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' dy='.35em' fill='white' font-size='14' font-weight='600'%3E张%3C/text%3E%3C/svg%3E" alt="张晓明" class="user-avatar-small">
+      <span style="font-weight: 600;">张晓明</span>
+      <span style="font-size: 0.875rem; color: rgba(20,20,22,0.4);">▼</span>
+    </div>
+  </header>
+
+  <div class="profile-hero">
+    <div class="profile-avatar-section">
+      <div class="profile-avatar-wrapper">
+        <div class="avatar-ring"></div>
+        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cdefs%3E%3ClinearGradient id='grad' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%230066ff;stop-opacity:1' /%3E%3Cstop offset='100%25' style='stop-color:%237877c6;stop-opacity:1' /%3E%3C/linearGradient%3E%3C/defs%3E%3Crect fill='url(%23grad)' width='180' height='180' rx='90'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' dy='.35em' fill='white' font-size='64' font-weight='700'%3E张%3C/text%3E%3C/svg%3E" alt="张晓明" class="profile-avatar">
+        <div class="change-avatar">
+          <span style="color: white; font-size: 1.25rem;">📷</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="profile-info">
+      <h1 class="profile-name">张晓明</h1>
+      <div class="profile-tags">
+        <div class="tag tag-blue">
+          <span>👤</span>
+          <span>系统管理员</span>
+        </div>
+        <div class="tag tag-green">
+          <span>🔬</span>
+          <span>技术研发部</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="info-grid">
+    <div class="info-section">
+      <h2 class="section-title">基本信息</h2>
+      <div class="info-row">
+        <div class="info-label">用户名</div>
+        <div class="info-value">zhangxiaoming</div>
+      </div>
+      <div class="info-row">
+        <div class="info-label">手机号</div>
+        <div class="info-value">138****5678</div>
+      </div>
+      <div class="info-row">
+        <div class="info-label">邮箱</div>
+        <div class="info-value">zhangxm@company.com</div>
+      </div>
+    </div>
+
+    <div class="info-section">
+      <h2 class="section-title">组织信息</h2>
+      <div class="info-row">
+        <div class="info-label">部门</div>
+        <div class="info-value">技术研发部</div>
+      </div>
+      <div class="info-row">
+        <div class="info-label">岗位</div>
+        <div class="info-value">高级工程师</div>
+      </div>
+      <div class="info-row">
+        <div class="info-label">角色</div>
+        <div class="info-value">系统管理员</div>
+      </div>
+      <div class="info-row">
+        <div class="info-label">创建时间</div>
+        <div class="info-value">2023-05-12 10:30:45</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active">基本资料</div>
+    <div class="tab">修改密码</div>
+  </div>
+
+  <div class="form-section">
+    <form>
+      <div class="form-grid">
+        <div class="form-row">
+          <label class="form-label">昵称</label>
+          <input type="text" class="form-input" value="张晓明">
+        </div>
+
+        <div class="form-row">
+          <label class="form-label">手机</label>
+          <input type="tel" class="form-input" value="138****5678">
+        </div>
+
+        <div class="form-row full">
+          <label class="form-label">邮箱</label>
+          <input type="email" class="form-input" value="zhangxm@company.com">
+        </div>
+
+        <div class="form-row full">
+          <label class="form-label">性别</label>
+          <div class="radio-group">
+            <label class="radio-option">
+              <input type="radio" name="gender" value="male" checked>
+              <span>男</span>
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="gender" value="female">
+              <span>女</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="button-group">
+        <button type="submit" class="btn btn-primary">保存</button>
+      </div>
+    </form>
+  </div>
+
+</div>
+
+</body>
+</html>

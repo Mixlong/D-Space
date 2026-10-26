@@ -1,6 +1,10 @@
 <template>
   <div class="user-info-head" @click="editCropper()">
-    <img :src="options.img" title="点击上传头像" class="img-circle img-lg" />
+    <img :src="options.img" title="点击上传头像" class="avatar-image" />
+    <div class="avatar-hover-mask">
+      <el-icon class="camera-icon"><Camera /></el-icon>
+      <span class="hover-text">更换头像</span>
+    </div>
     <el-dialog :title="title" v-model="open" width="800px" append-to-body @opened="modalOpened" @close="closeDialog">
       <el-row>
         <el-col :xs="24" :md="12" :style="{ height: '350px' }">
@@ -59,6 +63,7 @@
 </template>
 
 <script setup>
+import { Camera } from "@element-plus/icons-vue"
 import "vue-cropper/dist/index.css"
 import { VueCropper } from "vue-cropper"
 import { uploadAvatar } from "@/api/system/user"
@@ -159,34 +164,65 @@ function closeDialog() {
   position: relative;
   display: inline-block;
   cursor: pointer;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  overflow: hidden;
 
-  img {
-    width: 120px;
-    height: 120px;
-    border-radius: 50%;
+  .avatar-image {
+    width: 100%;
+    height: 100%;
     object-fit: cover;
     display: block;
+    transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
   }
-}
 
-.user-info-head:hover:after {
-  content: "+";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  color: #fff;
-  background: rgba(0, 0, 0, 0.6);
-  font-size: 40px;
-  font-style: normal;
-  font-weight: 300;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  cursor: pointer;
-  line-height: 120px;
-  text-align: center;
-  border-radius: 50%;
-  transition: all 0.3s ease;
+  .avatar-hover-mask {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(24, 144, 255, 0.35);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    color: #ffffff;
+    gap: 8px;
+
+    .camera-icon {
+      font-size: 24px;
+      transform: translateY(8px);
+      transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .hover-text {
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 1px;
+      transform: translateY(8px);
+      transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+  }
+
+  &:hover {
+    .avatar-image {
+      transform: scale(1.08);
+    }
+
+    .avatar-hover-mask {
+      opacity: 1;
+
+      .camera-icon,
+      .hover-text {
+        transform: translateY(0);
+      }
+    }
+  }
 }
 </style>

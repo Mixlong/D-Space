@@ -127,11 +127,11 @@
         @row-click="handleCardClick"
         v-loading="loading"
       >
-        <el-table-column prop="title" label="任务标题" min-width="200" align="center" show-overflow-tooltip />
-            <el-table-column prop="description" label="任务描述" min-width="250" align="center" show-overflow-tooltip />
-            <el-table-column 
+        <el-table-column prop="title" label="任务标题" min-width="240" align="center" show-overflow-tooltip />
+        <el-table-column prop="description" label="任务描述" min-width="360" align="center" show-overflow-tooltip />
+        <el-table-column 
           label="状态" 
-          width="100" 
+          width="96" 
           align="center"
           :filters="[
             { text: '待处理', value: 0 },
@@ -149,7 +149,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="剩余时间" width="120" align="center" sortable :sort-method="sortByDeadline">
+        <el-table-column label="剩余时间" width="116" align="center" sortable :sort-method="sortByDeadline">
           <template #default="{ row }">
             <span v-if="row.status !== -1 && row.status !== -2" :class="['countdown-text', getCountdownClass(row)]">
               {{ getCountdownText(row) }}
@@ -157,7 +157,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="assignor" label="交办人" width="120" align="center" />
+        <el-table-column prop="assignor" label="交办人" width="120" align="center" show-overflow-tooltip />
         <el-table-column 
           prop="createTime" 
           label="创建时间" 
@@ -242,6 +242,7 @@ import ViewSwitcher from '@/components/ViewSwitcher/index.vue'
 import { getTodoList, getTodoStatusCount, updateTodo, addExtension } from '@/api/todo'
 import useUserStore from '@/store/modules/user'
 import { buildUrlWithToken } from '@/utils/linkOpener'
+import { getBusinessLinkRouteLocation, getIssueTrackingIdFromItem } from '@/utils/issueTracking'
 import useCloudNavigatorStore from '@/store/modules/cloudNavigator'
 
 // 路由
@@ -637,12 +638,9 @@ const handleOpenLink = (item) => {
       }),
       token: userStore.token
     })
-    if (route.name !== 'DiTaiCloud') {
-      router.push({
-        path: '/ditai-cloud',
-        query: { url }
-      })
-    }
+    router.push(getBusinessLinkRouteLocation(url, {
+      id: getIssueTrackingIdFromItem(item)
+    }))
   } else {
     ElMessage.warning('暂无跳转链接')
   }

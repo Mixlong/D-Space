@@ -11,7 +11,7 @@ class AppUpdater {
     // 配置更新服务器
     autoUpdater.setFeedURL({
       provider: 'generic',
-      url: 'https://bikewise.oss-cn-shenzhen.aliyuncs.com/d-space/digismart-desktop' // 与 scripts/upload-to-oss.cjs 的上传路径保持一致
+      url: 'https://file.riding-evolved.com/d-space/digismart-desktop' // 与 scripts/upload-to-oss.cjs 的上传路径保持一致
     });
 
     // 自动下载更新

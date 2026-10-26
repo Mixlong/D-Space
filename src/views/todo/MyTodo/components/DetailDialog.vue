@@ -174,15 +174,15 @@
 
 <script setup>
 import { ref, watch, computed, nextTick } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
 import { UserFilled, Link, Monitor, CopyDocument } from '@element-plus/icons-vue'
 import { buildUrlWithToken } from '@/utils/linkOpener'
+import { getBusinessLinkRouteLocation, getIssueTrackingIdFromItem } from '@/utils/issueTracking'
 import { ElMessage } from 'element-plus'
 import useUserStore from '@/store/modules/user'
 import useCloudNavigatorStore from '@/store/modules/cloudNavigator'
 
 const router = useRouter()
-const route = useRoute()
 const userStore = useUserStore()
 const cloudNavigatorStore = useCloudNavigatorStore()
 const props = defineProps({
@@ -275,12 +275,9 @@ const handleOpenExternalLink = () => {
     builtUrl,
     token: userStore.token
   })
-  if (route.name !== 'DiTaiCloud') {
-    router.push({
-      path: '/ditai-cloud',
-      query: { url }
-    })
-  }
+  router.push(getBusinessLinkRouteLocation(url, {
+    id: getIssueTrackingIdFromItem(props.todoItem)
+  }))
 }
 
 // 处理在新窗口中打开链接 - 同样跳转到迪太云管理页面

@@ -126,19 +126,20 @@
     <!-- 任务表格列表 -->
     <div v-else-if="viewMode === 'table'" class="todo-table-wrapper">
       <el-table
+        class="todo-table"
         :data="tableData"
-        style="width: 100%; flex: 1;"
+        style="width: 100%;"
         height="100%"
         stripe
         border
         @row-click="handleCardClick"
         v-loading="loading"
       >
-        <el-table-column prop="title" label="任务标题" min-width="160" align="center" show-overflow-tooltip />
-        <el-table-column prop="description" label="任务描述" min-width="180" align="center" show-overflow-tooltip />
+        <el-table-column prop="title" label="任务标题" min-width="220" align="center" show-overflow-tooltip />
+        <el-table-column prop="description" label="任务描述" min-width="320" align="center" show-overflow-tooltip />
         <el-table-column 
           label="状态" 
-          width="80" 
+          width="96" 
           align="center"
           :filters="[
             { text: '待处理', value: 0 },
@@ -156,7 +157,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="剩余时间" width="105" align="center" sortable :sort-method="sortByDeadline">
+        <el-table-column label="剩余时间" width="116" align="center" sortable :sort-method="sortByDeadline">
           <template #default="{ row }">
             <span v-if="row.status !== -1 && row.status !== -2" :class="['countdown-text', getCountdownClass(row)]">
               {{ getCountdownText(row) }}
@@ -164,11 +165,11 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="assignor" label="交办人" width="90" align="center" show-overflow-tooltip />
+        <el-table-column prop="assignor" label="交办人" width="120" align="center" show-overflow-tooltip />
         <el-table-column 
           prop="createTime" 
           label="创建时间" 
-          width="140" 
+          width="160" 
           align="center"
           sortable
           :sort-method="sortByCreateTime"
@@ -180,7 +181,7 @@
         <el-table-column 
           prop="finishTime" 
           label="完成时间" 
-          width="140" 
+          width="160" 
           align="center"
           sortable
           :sort-method="sortByFinishTime"
@@ -293,6 +294,7 @@ import AssignDialog from './components/AssignDialog.vue'
 import DetailDialog from './components/DetailDialog.vue'
 import ViewSwitcher from '@/components/ViewSwitcher/index.vue'
 import { getTodoList, getTodoStatusCount, getTodoDetail, updateTodo, addExtension } from '@/api/todo'
+import { getBusinessLinkRouteLocation, getIssueTrackingIdFromItem } from '@/utils/issueTracking'
 
 // 路由
 const router = useRouter()
@@ -412,9 +414,6 @@ const handleCardsPerRowChange = (value) => {
     }
   })
 }
-
-// 表格高度
-const tableHeight = ref(window.innerHeight - 84 - 52 - 60)
 
 // 标签页配置（按业务流程顺序）
 const tabs = ref([
@@ -783,8 +782,9 @@ const handleAction = async (type, item) => {
   if (type === 'handle') {
     // 如果有办理URL，打开链接；否则提示
     if (item.assignmentUrl && item.assignmentUrl.trim()) {
-      // 打开办理URL
-      window.open(item.assignmentUrl, '_blank')
+      router.push(getBusinessLinkRouteLocation(item.assignmentUrl, {
+        id: getIssueTrackingIdFromItem(item)
+      }))
     } else {
       // 提示用户没有办理URL
       ElMessage.warning('该任务暂无办理链接')
@@ -1129,10 +1129,13 @@ onUnmounted(() => {
 
 <style lang="scss" scoped>
 .todo-page {
-  /* 使用窗口滚动，避免内层容器阻断 sticky */
-  min-height: calc(100vh - 54px);
+  height: calc(100vh - 54px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: linear-gradient(90deg, #f2f3f5 0%, #f2f3f5 100%);
-  padding:10px;
+  padding: 10px;
 }
 
 // 头部区域
@@ -1145,6 +1148,7 @@ onUnmounted(() => {
   border-radius: 8px;
   padding: 0 44px;
   height: 52px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1202,8 +1206,15 @@ onUnmounted(() => {
 // 卡片列表容器
 .todo-list-container {
   background: transparent;
-  /* 视口高度 - 顶部全局区域(54px) - 本页头部(52px) - 上下内边距和间距(40px可微调) */
-  height: calc(100vh - 54px - 52px - 40px);
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+
+  :deep(.el-scrollbar) {
+    flex: 1;
+    min-height: 0;
+  }
   
   :deep(.el-scrollbar__wrap) {
     overflow-x: hidden;
@@ -1232,7 +1243,7 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(6, 1fr);  // 默认6列，通过JavaScript动态控制
   gap: 10px;
-  min-height: 400px;
+  min-height: 100%;
   padding-bottom: 20px;
   
   // 空数据展示居中
@@ -1243,7 +1254,7 @@ onUnmounted(() => {
     align-items: center;
     justify-content: center;
     padding: 60px 0;
-    height:calc(100vh - 144px);
+    min-height: 100%;
     .el-empty__image {
       margin-bottom: 20px;
     }
@@ -1531,8 +1542,9 @@ onUnmounted(() => {
   border-radius: 8px;
   padding: 16px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-  /* 占满剩余空间 */
-  height: calc(100vh - 54px - 52px - 40px);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   
@@ -1543,6 +1555,11 @@ onUnmounted(() => {
     padding-top: 16px;
     border-top: 1px solid #f0f0f0;
     flex-shrink: 0;
+  }
+
+  .todo-table {
+    flex: 1;
+    min-height: 0;
   }
   
   :deep(.el-table) {

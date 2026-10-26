@@ -7,13 +7,12 @@ const packageJson = JSON.parse(
 )
 
 const expectedElectronMajor = {
-  transition: 21,
   legacy: 21,
   modern: 32,
 }
 
 if (!expectedChannel || !expectedElectronMajor[expectedChannel]) {
-  console.error('用法: node scripts/assert-release-manifest.cjs <transition|legacy|modern>')
+  console.error('用法: node scripts/assert-release-manifest.cjs <legacy|modern>')
   process.exit(1)
 }
 

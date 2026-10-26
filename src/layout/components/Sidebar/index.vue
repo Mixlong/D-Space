@@ -11,13 +11,14 @@
           @contextmenu.prevent="handleContextMenu($event, routeItem)"
         >
           <img
-            v-if="getRouteMeta(routeItem).icon"
-            :src="getMenuIcon(getRouteMeta(routeItem).icon, isActiveRoute(routeItem))"
+            v-if="hasMenuIcon(routeItem)"
+            :src="getMenuIcon(routeItem, isActiveRoute(routeItem))"
             class="menu-icon"
             alt=""
+            @error="handleMenuIconError($event, routeItem)"
           />
           <span class="menu-title">
-            {{ getRouteMeta(routeItem).title || routeItem.name || '菜单' }}
+            {{ getMenuTitle(routeItem) }}
           </span>
           <!-- 进行中数量徽章（我的待办、我的交办、我的流程） -->
           <span
@@ -57,6 +58,7 @@ import { Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import usePermissionStore from '@/store/modules/permission'
 import useMqttStore from '@/store/modules/mqtt'
+import { findMenuOverride } from '@/utils/menuConfig'
 import packageJson from '../../../../package.json'
 
 const currentYear = new Date().getFullYear()
@@ -77,6 +79,8 @@ import msgActiveIcon from '@/assets/images/msg-active.svg'
 import msgIcon from '@/assets/images/msg.svg'
 import docIcon from '@/assets/images/doc.svg'
 import docActiveIcon from '@/assets/images/doc-active.svg'
+import issueTrackingIcon from '@/assets/images/issue-tracking.svg'
+import issueTrackingActiveIcon from '@/assets/images/issue-tracking-active.svg'
 
 const route = useRoute()
 const permissionStore = usePermissionStore()
@@ -89,14 +93,24 @@ const contextMenuY = ref(0)
 const currentContextRoute = ref(null)
 
 // 可刷新的路由列表（包含 iframe 的页面）
-const refreshableRoutes = ['/ditai-cloud', '/document-process']
+const refreshableRoutes = ['/ditai-cloud', '/document-process', '/issue-tracking']
+
+const isCommonWebviewRoute = (routeItem) => {
+  const meta = getRouteMeta(routeItem)
+  const override = getMenuOverride(routeItem)
+  return meta.webviewConfig?.type === 'webview' || override?.type === 'webview'
+}
+
+const isRefreshableRoute = (routeItem) => {
+  return refreshableRoutes.some(path => routeItem.path.includes(path)) || isCommonWebviewRoute(routeItem)
+}
 
 // 处理右键菜单
 const handleContextMenu = (event, routeItem) => {
-  console.log('[Sidebar] 右键菜单:', routeItem.path, '可刷新:', refreshableRoutes.some(path => routeItem.path.includes(path)))
+  console.log('[Sidebar] 右键菜单:', routeItem.path, '可刷新:', isRefreshableRoute(routeItem))
 
   // 只有可刷新的页面才显示右键菜单
-  if (!refreshableRoutes.some(path => routeItem.path.includes(path))) {
+  if (!isRefreshableRoute(routeItem)) {
     return
   }
 
@@ -119,8 +133,10 @@ const handleRefresh = async () => {
   const path = currentContextRoute.value.path
   const isDiTai = path.includes('/ditai-cloud')
   const isDocument = path.includes('/document-process')
+  const isIssue = path.includes('/issue-tracking')
+  const isCommonWebview = isCommonWebviewRoute(currentContextRoute.value)
 
-  if (!isDiTai && !isDocument) {
+  if (!isDiTai && !isDocument && !isIssue && !isCommonWebview) {
     contextMenuVisible.value = false
     return
   }
@@ -141,9 +157,15 @@ const handleRefresh = async () => {
   if (isDiTai) {
     window.dispatchEvent(new CustomEvent('reset-ditai-cloud'))
     ElMessage.success('正在刷新运营管理...')
-  } else {
+  } else if (isDocument) {
     window.dispatchEvent(new CustomEvent('reset-document-process'))
     ElMessage.success('正在刷新文档与流程...')
+  } else if (isIssue) {
+    window.dispatchEvent(new CustomEvent('reset-issue-tracking'))
+    ElMessage.success('正在刷新问题反馈...')
+  } else {
+    window.dispatchEvent(new CustomEvent('refresh-common-webview', { detail: { path } }))
+    ElMessage.success('正在刷新页面...')
   }
 }
 
@@ -184,10 +206,24 @@ const getRouteMeta = (routeItem) => {
   return routeItem.meta || {}
 }
 
+const getMenuOverride = (routeItem) => {
+  return findMenuOverride(permissionStore.menuConfig, routeItem)
+}
+
+const getMenuTitle = (routeItem) => {
+  const override = getMenuOverride(routeItem)
+  return override?.title || getRouteMeta(routeItem).title || routeItem.name || '菜单'
+}
+
+const hasMenuIcon = (routeItem) => {
+  const override = getMenuOverride(routeItem)
+  return Boolean(override?.icon || override?.activeIcon || getRouteMeta(routeItem).icon)
+}
+
 const sidebarRouters = computed(() => {
   const routes = permissionStore.sidebarRouters
   // 过滤掉 hidden 的路由
-  const visibleRoutes = routes.filter(r => !r.hidden)
+  const visibleRoutes = routes.filter(r => !r.hidden && !getMenuOverride(r)?.hidden)
   
   console.log('🔍 Sidebar Routes Debug:')
   console.log('所有路由:', routes)
@@ -205,7 +241,7 @@ const isActiveRoute = (routeItem) => {
 }
 
 // 获取菜单图标
-const getMenuIcon = (iconName, isActive) => {
+const getLocalMenuIcon = (iconName, isActive) => {
   const iconMap = {
     'menu-todo': isActive ? menuTodoActiveIcon : menuTodoIcon,
     'menu-assign': isActive ? menuAssignActiveIcon : menuAssignIcon,
@@ -213,16 +249,36 @@ const getMenuIcon = (iconName, isActive) => {
     'my-process': isActive ? myProcessActiveIcon : myProcessIcon,
     'dty': isActive ? dtyActiveIcon : dtyIcon,
     'message': isActive ? msgActiveIcon : msgIcon,
-    'doc':isActive ?docActiveIcon:docIcon
+    'doc': isActive ? docActiveIcon : docIcon,
+    'issue-tracking': isActive ? issueTrackingActiveIcon : issueTrackingIcon
   }
   const result = iconMap[iconName] || menuTodoIcon
   return result
+}
+
+const getMenuIcon = (routeItem, isActive) => {
+  const override = getMenuOverride(routeItem)
+  if (override?.activeIcon && isActive) {
+    return override.activeIcon
+  }
+  if (override?.icon) {
+    return override.icon
+  }
+
+  return getLocalMenuIcon(getRouteMeta(routeItem).icon, isActive)
+}
+
+const handleMenuIconError = (event, routeItem) => {
+  const fallbackIcon = getLocalMenuIcon(getRouteMeta(routeItem).icon, isActiveRoute(routeItem))
+  if (event.target.src !== fallbackIcon) {
+    event.target.src = fallbackIcon
+  }
 }
 </script>
 
 <style lang="scss" scoped>
 .sidebar-container {
-  width: 140px;
+  width: 160px;
   height: calc(100vh - 54px);
   background-color: #f4f9ff;
   position: fixed;
@@ -231,6 +287,8 @@ const getMenuIcon = (iconName, isActive) => {
   z-index: 100;
   display: flex;
   flex-direction: column;
+  border-right: 1px solid #ebf3ff;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.02);
   
   .scrollbar-wrapper {
     background-color: #f4f9ff;
@@ -239,11 +297,11 @@ const getMenuIcon = (iconName, isActive) => {
   }
 
   .menu-list {
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    align-items: center;
+    padding: 16px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    align-items: center !important;
     min-height: 100%;
   }
 
@@ -254,79 +312,78 @@ const getMenuIcon = (iconName, isActive) => {
   }
 
   .menu-item {
-    width: 108px;
-    height: 90px;
-    background: #f4f9ff;
-    border-radius: 8px;
+    width: 128px !important;
+    height: 80px !important;
+    background: transparent !important;
+    border-radius: 8px !important;
     cursor: pointer;
-    transition: all 0.3s;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     text-decoration: none;
     position: relative;
     overflow: hidden;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 8px !important;
 
     .menu-icon {
-      position: absolute;
-      left: 50%;
-      top: 20px;
-      transform: translateX(-50%);
-      width: 30px;
-      height: 30px;
+      width: 28px !important;
+      height: 28px !important;
       object-fit: contain;
+      transform: translateY(4px);
+      transition: transform 0.25s ease;
     }
 
     .menu-title {
-      position: absolute;
-      left: 50%;
-      top: 62px;
-      transform: translateX(-50%);
       font-family: 'Alibaba PuHuiTi', 'Microsoft YaHei', sans-serif;
-      font-size: 15px;
+      font-size: 14px !important;
       font-weight: 400;
-      color: #9f9f9f;
+      color: #888888 !important;
       text-align: center;
-      transition: color 0.3s;
+      transition: color 0.25s ease;
       white-space: nowrap;
-      line-height: normal;
-      width: 100%;
-      padding: 0 8px;
+      line-height: 1.2;
+      width: 100% !important;
+      padding: 0 8px !important;
       box-sizing: border-box;
     }
 
     &:hover {
-      background: #e0ebff;
+      background: rgba(224, 235, 255, 0.6) !important;
       
-      .menu-icon,
       .menu-title {
-        color: var(--el-color-primary);
+        color: var(--el-color-primary) !important;
       }
     }
 
     &.is-active {
-      background: #e0ebff;
+      background: #e0ebff !important;
+      box-shadow: 0 4px 12px rgba(224, 235, 255, 0.4) !important;
       
-      .menu-icon,
       .menu-title {
-        color: var(--el-color-primary);
+        color: var(--el-color-primary) !important;
+        font-weight: 600;
       }
     }
 
     // 数量徽章样式
     .menu-badge {
-      position: absolute;
-      top: 12px;
-      right: 12px;
-      min-width: 20px;
-      height: 20px;
-      line-height: 20px;
-      padding: 0 6px;
-      background: #ff4d4f;
-      color: #ffffff;
-      font-size: 12px;
-      font-weight: bold;
-      text-align: center;
-      border-radius: 10px;
-      box-shadow: 0 2px 4px rgba(255, 77, 79, 0.3);
-      z-index: 10;
+      position: absolute !important;
+      top: 6px !important;
+      right: 10px !important;
+      min-width: 20px !important;
+      height: 20px !important;
+      line-height: 20px !important;
+      padding: 0 6px !important;
+      background: #ff4d4f !important;
+      color: #ffffff !important;
+      font-size: 12px !important;
+      font-weight: bold !important;
+      text-align: center !important;
+      border-radius: 10px !important;
+      box-shadow: 0 2px 4px rgba(255, 77, 79, 0.3) !important;
+      z-index: 10 !important;
     }
   }
 
@@ -335,12 +392,12 @@ const getMenuIcon = (iconName, isActive) => {
     bottom: 0;
     left: 0;
     right: 0;
-    padding: 16px;
+    padding: 12px 8px;
     text-align: center;
-    font-size: 12px;
+    font-size: 11px;
     color: #999;
     background-color: #f4f9ff;
-    border-top: 1px solid #e8f0ff;
+    border-top: 1px solid #ebf3ff;
     flex-shrink: 0;
   }
 

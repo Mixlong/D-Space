@@ -86,6 +86,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
   
+  // 仅暴露 IAM 凭据读写，不向渲染进程提供任意文件路径或文件系统权限。
+  iamStorage: {
+    load: () => ipcRenderer.invoke('iam:load'),
+    save: (credentials) => ipcRenderer.invoke('iam:save', credentials)
+  },
+
   // 标识当前是Electron环境
   isElectron: true,
   
@@ -99,6 +105,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 平台信息
   platform: process.platform,
   getRuntimeInfo: () => ipcRenderer.invoke('get-runtime-info'),
+  // Vue 与初始路由真正就绪后通知主进程，避免首次安装时白屏无人恢复。
+  notifyAppReady: () => ipcRenderer.send('renderer-app-ready'),
+  reportAppStartupFailed: (message) => ipcRenderer.send('renderer-app-startup-failed', String(message || '').slice(0, 300)),
   
   // 自动更新相关
   onUpdateAvailable: (callback) => {
@@ -117,10 +126,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // payload 可选，目前只在 Mac 静默安装时使用（提供回退下载地址）
   installUpdate: (payload) => ipcRenderer.send('install-update', payload),
   checkForUpdates: () => ipcRenderer.send('check-for-updates'),
+  // 登录后读取字典配置再触发检查；config 为 null 时主进程回退默认更新地址
+  checkForUpdatesWithConfig: (config) => ipcRenderer.send('check-for-updates-with-config', config),
 
   // Mac 静默安装进度推送
   onMacSilentInstallProgress: (callback) => {
     ipcRenderer.on('mac-silent-install-progress', (event, data) => callback(data));
+  },
+  // 开发调试模式下安装指令触发成功通知
+  onUpdateInstallDevDone: (callback) => {
+    ipcRenderer.on('update-install-dev-done', (event, data) => callback(data));
   },
   
   // 手动下载更新（Mac 备用方案）
@@ -152,6 +167,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('download-progress-manual');
     ipcRenderer.removeAllListeners('download-complete-manual');
     ipcRenderer.removeAllListeners('mac-silent-install-progress');
+    ipcRenderer.removeAllListeners('update-install-dev-done');
   }
 });
 

@@ -172,7 +172,7 @@
         @row-click="handleCardClick"
         v-loading="loading"
       >
-        <el-table-column label="交办标题" min-width="150" align="center">
+        <el-table-column label="交办标题" min-width="260" align="center">
           <template #default="{ row }">
             <div class="table-title-cell">
               <span class="table-title-text">{{ row.title }}</span>
@@ -191,10 +191,14 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="content" label="交办内容" min-width="180" align="center" show-overflow-tooltip />
+        <el-table-column label="交办内容" min-width="360" align="center">
+          <template #default="{ row }">
+            <div class="rich-content-preview" v-html="formatRichContentPreview(row.content)"></div>
+          </template>
+        </el-table-column>
         <el-table-column 
           label="状态" 
-          width="80" 
+          width="96" 
           align="center"
           :filters="[
             { text: '待接收', value: 0 },
@@ -210,14 +214,14 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="剩余时间" width="100" align="center" sortable :sort-method="sortByDeadline">
+        <el-table-column label="剩余时间" width="116" align="center" sortable :sort-method="sortByDeadline">
           <template #default="{ row }">
             <span :class="['countdown-text', getCountdownClass(row)]">
               {{ getCountdownText(row) }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="接办人" width="160" header-align="center" align="left">
+        <el-table-column label="接办人" width="220" header-align="center" align="left">
           <template #default="{ row }">
             <div class="assignee-list">
               <el-tag 
@@ -241,7 +245,7 @@
           :sort-method="sortByCreateTime"
         >
           <template #default="{ row }">
-            {{ parseTime(row.createTime, '{y}-{m}-{d} {h}:{i}') }}
+            {{ parseTime(row.createTime, '{y}-{m}-{d}') }}
           </template>
         </el-table-column>
         <el-table-column 
@@ -253,7 +257,7 @@
           :sort-method="sortByFinishTime"
         >
           <template #default="{ row }">
-            <span v-if="row.finishTime">{{ parseTime(row.finishTime, '{y}-{m}-{d} {h}:{i}') }}</span>
+            <span v-if="row.finishTime">{{ parseTime(row.finishTime, '{y}-{m}-{d}') }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
@@ -400,6 +404,31 @@ const baseUrl = import.meta.env.VITE_APP_BASE_API
 
 // 当前时间（用于倒计时更新）
 const currentTime = ref(new Date())
+
+const escapeHtml = (value) => {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+const formatRichContentPreview = (content) => {
+  if (!content) return ''
+
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(`<div>${content}</div>`, 'text/html')
+  const mediaSelector = 'img, video, audio, iframe'
+
+  doc.body.querySelectorAll('script, style').forEach(node => node.remove())
+  doc.body.querySelectorAll(mediaSelector).forEach(node => {
+    node.replaceWith(doc.createTextNode(' [图片] '))
+  })
+
+  const text = doc.body.textContent?.replace(/\s+/g, ' ').trim()
+  return escapeHtml(text)
+}
 
 // 视图模式：card 卡片视图，table 表格视图（从localStorage读取）
 const viewMode = ref(localStorage.getItem('myAssign_viewMode') || 'card')
@@ -1897,6 +1926,15 @@ onUnmounted(() => {
         background: #f5f7fa;
         color: #606266;
         font-weight: 600;
+
+        .cell {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 4px;
+          padding: 0 10px;
+          white-space: nowrap;
+        }
       }
     }
     
@@ -2040,6 +2078,15 @@ onUnmounted(() => {
         background: #f5f7fa;
         color: #606266;
         font-weight: 600;
+
+        .cell {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 4px;
+          padding: 0 10px;
+          white-space: nowrap;
+        }
       }
     }
     
@@ -2067,6 +2114,43 @@ onUnmounted(() => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .rich-content-preview {
+    max-width: 100%;
+    overflow: hidden;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    :deep(p),
+    :deep(ol),
+    :deep(ul) {
+      display: inline;
+      margin: 0;
+      padding: 0;
+    }
+
+    :deep(li) {
+      display: inline;
+    }
+
+    :deep(li + li::before) {
+      content: '、';
+    }
+
+    :deep(a) {
+      color: #409eff;
+      text-decoration: none;
+    }
+
+    :deep(img) {
+      max-width: 80px;
+      max-height: 28px;
+      vertical-align: middle;
+      border-radius: 4px;
+      object-fit: cover;
+    }
   }
   
   .reminder-icon-table {

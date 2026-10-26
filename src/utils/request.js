@@ -6,12 +6,14 @@ import { tansParams, blobValidate } from '@/utils/ruoyi'
 import cache from '@/plugins/cache'
 import { saveAs } from 'file-saver'
 import useUserStore from '@/store/modules/user'
-import Cookies from 'js-cookie'
+import { getIamValue, updateIamFromResponse } from '@/utils/iam'
 import { decrypt } from '@/utils/jsencrypt'
 
 let downloadLoadingInstance
 // 是否显示重新登录
 export let isRelogin = { show: false }
+// 后台静默请求（如自动更新检查）：失败时不弹出错误提示
+const isSilentRequest = (config) => config?.headers?.silent === true
 // 是否正在执行自动登录
 let isAutoLogging = false
 // 等待自动登录完成的请求队列
@@ -28,30 +30,14 @@ const service = axios.create({
 
 // request拦截器
 service.interceptors.request.use(config => {
-  // 添加 iam header（用于登录相关的额外身份验证）
-  // 优先使用 localStorage（兼容 Electron），降级使用 Cookies
+  // 沿用当前 IAM；新 IAM 保存后下一次登录会自动使用新值
   try {
-    let iamKey, iamValue;
-
-    // 优先从 localStorage 读取
-    iamKey = localStorage.getItem("iamKeys");
-    if (iamKey) {
-      iamValue = localStorage.getItem("iamValue");
-    }
-
-    if (!iamKey) {
-      // 如果 localStorage 没有，尝试从 Cookies 读取（兼容旧版本）
-      iamKey = Cookies.get("iamKeys");
-      if (iamKey) {
-        iamValue = Cookies.get("iamValue");
-      }
-    }
-
-    // 设置 IAM header
-    if (config.url.indexOf("/login") !== -1 && iamValue) {
-      config.headers["iam"] = `${iamValue}`;
+    const iamValue = getIamValue()
+    if (/\/login(?:\?|$)/.test(config.url) && iamValue) {
+      config.headers['iam'] = iamValue
     }
   } catch (error) {
+    console.warn('[Request] 读取 IAM 失败:', error)
   }
 
   // 是否需要设置 token
@@ -104,7 +90,7 @@ service.interceptors.request.use(config => {
 })
 
 // 响应拦截器
-service.interceptors.response.use(res => {
+service.interceptors.response.use(async res => {
   // 未设置状态码则默认成功状态
   const code = res.data.code || 200
   // 获取错误信息
@@ -116,6 +102,10 @@ service.interceptors.response.use(res => {
   if (code === 401) {
     // 获取原始请求配置，用于重试
     const originalConfig = res.config
+    // 公开认证接口和已重试请求不得再触发静默登录，防止连续验证
+    if (originalConfig?._iamAuthRetried || originalConfig?.headers?.isToken === false || /\/login(?:\?|$)/.test(originalConfig?.url || '')) {
+      return Promise.reject(new Error('身份认证失败，请重新登录'))
+    }
 
     // 检查是否有保存的账号密码（记住密码）
     const rememberMe = localStorage.getItem('rememberMe') === 'true'
@@ -158,18 +148,22 @@ service.interceptors.response.use(res => {
     }
     return Promise.reject('无效的会话，或者会话已过期，请重新登录。')
   } else if (code === 500) {
-    ElMessage({ message: msg, type: 'error' })
+    if (!isSilentRequest(res.config)) ElMessage({ message: msg, type: 'error' })
     return Promise.reject(new Error(msg))
   } else if (code === 601) {
-    ElMessage({ message: msg, type: 'warning' })
+    if (!isSilentRequest(res.config)) ElMessage({ message: msg, type: 'warning' })
     return Promise.reject(new Error(msg))
   } else if (code === 40010) {
     // 需要短信验证码，不显示错误提示，直接抛出错误码
     return Promise.reject(code)
   } else if (code !== 200) {
-    ElNotification.error({ title: msg })
+    if (!isSilentRequest(res.config)) ElNotification.error({ title: msg })
     return Promise.reject('error')
   } else {
+    // 只接受登录及短信认证接口签发的新 IAM，避免普通业务响应误覆盖认证凭据。
+    if (/\/(?:login|sms\/verify)(?:\?|$)/.test(res.config?.url || '')) {
+      await updateIamFromResponse(res.data)
+    }
     return Promise.resolve(res.data)
   }
 },
@@ -183,7 +177,9 @@ service.interceptors.response.use(res => {
     } else if (message.includes("Request failed with status code")) {
       message = "系统接口" + message.substr(message.length - 3) + "异常"
     }
-    ElMessage({ message: message, type: 'error', duration: 5 * 1000 })
+    if (!isSilentRequest(error.config)) {
+      ElMessage({ message: message, type: 'error', duration: 5 * 1000 })
+    }
     return Promise.reject(error)
   }
 )
@@ -239,25 +235,9 @@ async function performAutoLogin(username, encryptedPassword) {
       'Content-Type': 'application/json;charset=utf-8'
     }
 
-    // 添加 IAM header（复制 request.js 拦截器中的逻辑）
+    // 静默登录和手动登录使用同一份最新 IAM
     try {
-      let iamKey, iamValue
-
-      // 优先从 localStorage 读取
-      iamKey = localStorage.getItem('iamKeys')
-      if (iamKey) {
-        iamValue = localStorage.getItem('iamValue')
-      }
-
-      if (!iamKey) {
-        // 如果 localStorage 没有，尝试从 Cookies 读取（兼容旧版本）
-        iamKey = Cookies.get('iamKeys')
-        if (iamKey) {
-          iamValue = Cookies.get('iamValue')
-        }
-      }
-
-      // 设置 IAM header（登录接口需要）
+      const iamValue = getIamValue()
       if (iamValue) {
         headers['iam'] = iamValue
       }
@@ -276,6 +256,7 @@ async function performAutoLogin(username, encryptedPassword) {
     // 检查登录响应（与 userStore.login 的处理逻辑一致）
     if (loginResponse.data && loginResponse.data.code === 200 && loginResponse.data.token) {
       const newToken = loginResponse.data.token
+      await updateIamFromResponse(loginResponse.data)
 
       // 保存新 Token（与 userStore.login 一致）
       setToken(newToken)
@@ -290,8 +271,9 @@ async function performAutoLogin(username, encryptedPassword) {
 
       for (const { config, resolve, reject } of requests) {
         try {
-          // 更新请求头中的 Token
+          // 更新 Token 且最多重试一次，防止 401 循环登录
           config.headers['Authorization'] = 'Bearer ' + newToken
+          config._iamAuthRetried = true
           // 重新发送请求
           const retryResponse = await service(config)
           resolve(retryResponse)

@@ -10,6 +10,7 @@
       />
 
     <!-- 文档流程组件：独立渲染，使用 v-show 避免 iframe 重载 -->
+    <!-- 文档流程组件：独立渲染，使用 v-show 避免 iframe 重载 -->
       <DocumentProcess
         v-if="docEverMounted"
         v-show="isDocRoute"
@@ -17,8 +18,16 @@
         class="doc-container"
       />
 
+    <!-- 问题跟踪组件：独立渲染，使用 v-show 避免 iframe 重载 -->
+      <IssueTracking
+        v-if="issueTrackingEverMounted"
+        v-show="isIssueTrackingRoute"
+        :key="issueTrackingKey"
+        class="issue-tracking-container"
+      />
+
     <!-- 其他路由组件 -->
-    <div v-show="!isCloudRoute && !isDocRoute">
+    <div v-show="!isCloudRoute && !isDocRoute && !isIssueTrackingRoute">
       <router-view  v-slot="{ Component, route }" >
           <keep-alive :include="tagsViewStore.cachedViews">
             <component v-if="!route.meta.link" :is="Component" :key="route.name"/>
@@ -32,10 +41,13 @@
 </template>
 
 <script setup>
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute } from 'vue-router'
 import copyright from "./Copyright/index"
 import iframeToggle from "./IframeToggle/index"
 import DiTaiCloud from '@/views/cloud/DiTaiCloud/index.vue'
 import DocumentProcess from '@/views/cloud/DocumentProcess/index.vue'
+import IssueTracking from '@/views/issueTracking/index.vue'
 import useTagsViewStore from '@/store/modules/tagsView'
 
 const route = useRoute()
@@ -58,6 +70,14 @@ const isDocRoute = computed(() => {
   return isDoc
 })
 
+// 控制问题跟踪组件的显示
+const issueTrackingEverMounted = ref(false)
+const issueTrackingKey = ref(0)
+const isIssueTrackingRoute = computed(() => {
+  const isIssue = route.name === 'IssueTracking' || route.path.includes('/issue-tracking')
+  return isIssue
+})
+
 // 完全重置 iframe 组件（销毁 + 重建）
 // 与 refresh-* 事件不同：refresh-* 只重新加载 iframe 内嵌站点，父组件状态保留；
 // reset-* 会让组件销毁重建，连父组件的 isLoading / retryCount / cacheBustToken 等都归零。
@@ -68,6 +88,10 @@ const handleResetCloud = () => {
 const handleResetDoc = () => {
   console.log('[AppMain] 🔁 完全重置 DocumentProcess 组件')
   docKey.value++
+}
+const handleResetIssueTracking = () => {
+  console.log('[AppMain] 🔁 完全重置 IssueTracking 组件')
+  issueTrackingKey.value++
 }
 
 // 监听路由，首次进入迪太云时挂载组件
@@ -86,6 +110,14 @@ watch(isDocRoute, (val) => {
   }
 }, { immediate: true })
 
+// 监听路由，首次进入问题跟踪时挂载组件
+watch(isIssueTrackingRoute, (val) => {
+  if (val) {
+    issueTrackingEverMounted.value = true
+    console.log('[AppMain] ✅ IssueTracking 组件已挂载（永久保留）')
+  }
+}, { immediate: true })
+
 // 调试：监听缓存列表变化
 watch(() => tagsViewStore.cachedViews, (newVal) => {
   console.log('[AppMain] 📋 当前缓存的组件列表:', newVal)
@@ -98,11 +130,13 @@ onMounted(() => {
   // 监听"完全重置"事件（由 tab.refreshPage 在 iframe 路由上派发）
   window.addEventListener('reset-ditai-cloud', handleResetCloud)
   window.addEventListener('reset-document-process', handleResetDoc)
+  window.addEventListener('reset-issue-tracking', handleResetIssueTracking)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('reset-ditai-cloud', handleResetCloud)
   window.removeEventListener('reset-document-process', handleResetDoc)
+  window.removeEventListener('reset-issue-tracking', handleResetIssueTracking)
 })
 
 watch(() => route.fullPath, () => {
@@ -143,7 +177,8 @@ function addIframe() {
 }
 
 .cloud-container,
-.doc-container {
+.doc-container,
+.issue-tracking-container {
   width: 100%;
   height: 100%;
   position: absolute;

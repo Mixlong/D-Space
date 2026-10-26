@@ -5,7 +5,7 @@ copyright: Copyright © 2025 D-Space
 # 自动更新配置
 publish:
   provider: generic
-  url: https://bikewise.oss-cn-shenzhen.aliyuncs.com/d-space/digismart-desktop
+  url: https://file.riding-evolved.com/d-space/digismart-desktop
 
 directories:
   output: electron_dist

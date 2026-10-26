@@ -1,12 +1,5 @@
 <template>
   <div class="document-process-container">
-    <!-- 加载状态提示 -->
-    <div v-if="isLoading" class="loading-overlay">
-      <div class="loading-spinner"></div>
-      <p>{{ userStore.token ? '正在加载制度流程平台...' : '正在等待登录状态...' }}</p>
-      <span class="loading-time" v-if="loadingSeconds > 0">已等待 {{ loadingSeconds }} 秒</span>
-      <span class="loading-hint" v-if="loadingSeconds >= 10">网络较慢，请稍候...</span>
-    </div>
     <!-- 加载失败提示 -->
     <div v-if="loadError" class="error-overlay">
       <p>⚠️ 页面加载失败</p>
@@ -17,7 +10,7 @@
     <iframe
       ref="iframeRef"
       class="document-webview"
-      :class="{ 'iframe-hidden': isLoading || loadError }"
+      :class="{ 'iframe-hidden': loadError }"
       frameborder="0"
       loading="lazy"
       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -36,10 +29,13 @@ export default {
 <script setup>
 import { ref, onMounted, onActivated, onDeactivated, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { getFirstQueryValue, getRouteQueryParams, getRouteWebviewConfig, normalizeUrlToBaseOrigin } from '@/utils/webviewMenu'
+import usePermissionStore from '@/store/modules/permission'
 import useUserStore from '@/store/modules/user'
 
 const route = useRoute()
 const userStore = useUserStore()
+const permissionStore = usePermissionStore()
 const documentUrl = ref('')
 const iframeRef = ref(null)
 const cacheBustToken = ref(Date.now().toString())
@@ -119,7 +115,7 @@ const startLoadTimeout = () => {
   
   // 设置新的超时计时器
   loadTimeout.value = setTimeout(() => {
-    // 如果仍在加载中，说明超时了
+    // 如果加载未完成，说明超时了
     if (isLoading.value && !loadError.value) {
       console.warn('[文档流程平台] ⏰ 加载超时，尝试重新加载...')
       
@@ -192,10 +188,14 @@ const getDocumentBaseUrl = () => {
 
 // 构建带 token 的 hash 路由 URL
 // 目标格式: http://xxx/document-v3/#/home?token=xxx
-const buildHashUrlWithToken = (baseUrl, token, extraParams = {}) => {
+const buildHashUrlWithToken = (baseUrl, token, extraParams = {}, options = {}) => {
+  const {
+    paramName = 'token',
+    stripBearer = true
+  } = options
   // 去掉 Bearer 前缀
   let cleanToken = token
-  if (cleanToken && cleanToken.toLowerCase().startsWith('bearer ')) {
+  if (stripBearer && cleanToken && cleanToken.toLowerCase().startsWith('bearer ')) {
     cleanToken = cleanToken.replace(/^bearer\s+/i, '')
   }
 
@@ -213,7 +213,7 @@ const buildHashUrlWithToken = (baseUrl, token, extraParams = {}) => {
     // 没有 hash，直接拼接
     const queryList = []
     if (cleanToken) {
-      queryList.push(`token=${encodeURIComponent(cleanToken)}`)
+      queryList.push(`${encodeURIComponent(paramName)}=${encodeURIComponent(cleanToken)}`)
     }
     if (extraQuery) {
       queryList.push(extraQuery)
@@ -227,7 +227,7 @@ const buildHashUrlWithToken = (baseUrl, token, extraParams = {}) => {
 
   const queryList = []
   if (cleanToken) {
-    queryList.push(`token=${encodeURIComponent(cleanToken)}`)
+    queryList.push(`${encodeURIComponent(paramName)}=${encodeURIComponent(cleanToken)}`)
   }
   if (extraQuery) {
     queryList.push(extraQuery)
@@ -247,33 +247,19 @@ const buildHashUrlWithToken = (baseUrl, token, extraParams = {}) => {
 // 加载 URL
 const loadUrl = (options = {}) => {
   const { forceRefresh = false } = options
-  const urlFromQuery = route.query.url
-  let targetUrl = getDocumentBaseUrl()
+  const webviewConfig = getRouteWebviewConfig(route, permissionStore.menuConfig)
+  const urlFromQuery = getFirstQueryValue(route.query.url)
+  let targetUrl = urlFromQuery || webviewConfig.url || getDocumentBaseUrl()
 
-  console.log('[文档流程平台] 环境变量原始值:', import.meta.env.VITE_DOCUMENT_PROCESS_URL)
-
-  // 如果有路由参数，替换域名但保留路径和参数
   if (urlFromQuery) {
-    try {
-      const envBaseUrl = new URL(getDocumentBaseUrl())
-      const queryUrl = new URL(urlFromQuery)
-
-      // 使用环境配置的域名 + 传入的路径和参数
-      targetUrl = envBaseUrl.origin + queryUrl.pathname + queryUrl.search + queryUrl.hash
-      console.log('[文档流程平台] 替换域名:', {
-        原始URL: urlFromQuery,
-        环境域名: envBaseUrl.origin,
-        最终URL: targetUrl
-      })
-    } catch (e) {
-      console.warn('[文档流程平台] URL 解析失败，使用默认URL:', e)
-      targetUrl = getDocumentBaseUrl()
-    }
+    targetUrl = normalizeUrlToBaseOrigin(urlFromQuery, getDocumentBaseUrl())
   }
 
+  console.log('[文档流程平台] 环境变量原始值:', import.meta.env.VITE_DOCUMENT_PROCESS_URL)
   console.log('[文档流程平台] 开始加载 URL:', targetUrl)
+  console.log('[文档流程平台] WebView配置:', webviewConfig)
 
-  if (!userStore.token) {
+  if (!userStore.token && webviewConfig.appendToken !== false) {
     console.error('[文档流程平台] token 为空！')
     isLoading.value = true
     loadError.value = false
@@ -285,8 +271,21 @@ const loadUrl = (options = {}) => {
     cacheBustToken.value = nextCacheBustToken
   }
 
-  // 使用 hash 路由方式拼接 token
-  const nextUrl = buildHashUrlWithToken(targetUrl, userStore.token, { _t: nextCacheBustToken })
+  const hashParams = {
+    ...(webviewConfig.urlParams || {}),
+    ...getRouteQueryParams(route, ['url']),
+    _t: nextCacheBustToken
+  }
+
+  const nextUrl = buildHashUrlWithToken(
+    targetUrl,
+    webviewConfig.appendToken === false ? '' : userStore.token,
+    hashParams,
+    {
+      paramName: webviewConfig.tokenParamName || 'token',
+      stripBearer: webviewConfig.stripBearer !== false
+    }
+  )
 
   console.log('[文档流程平台] 最终 URL (带 token):', nextUrl)
 
@@ -400,7 +399,6 @@ watch(() => route.query.url, (newUrl, oldUrl) => {
     }
   }
   
-  .loading-overlay,
   .error-overlay {
     position: absolute;
     top: 0;
@@ -420,32 +418,11 @@ watch(() => route.query.url, (newUrl, oldUrl) => {
       font-size: 14px;
     }
     
-    .loading-time {
-      margin-top: 8px;
-      color: #909399;
-      font-size: 12px;
-    }
-    
-    .loading-hint {
-      margin-top: 4px;
-      color: #e6a23c;
-      font-size: 12px;
-    }
-    
     .error-hint {
       margin-top: 8px;
       color: #909399;
       font-size: 12px;
     }
-  }
-  
-  .loading-spinner {
-    width: 40px;
-    height: 40px;
-    border: 3px solid #e4e7ed;
-    border-top-color: #409eff;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
   }
   
   .error-overlay {
@@ -464,10 +441,5 @@ watch(() => route.query.url, (newUrl, oldUrl) => {
     }
   }
   
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
 }
 </style>
