@@ -1,0 +1,149 @@
+name: D-Space 全平台一键打包
+
+# GitHub 仓库 Actions → D-Space 全平台一键打包 → Run workflow
+# 不发布 OSS，不创建 Release，不修改原仓库文件。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dspace-all-platform-packages
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: ${{ matrix.description }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: mac
+            description: Mac Intel + Apple Silicon
+            runner: macos-15
+            channel: modern
+            builder_config: electron-builder.modern.cjs
+            output: modern
+          - target: win10
+            description: Windows 10/11 x64
+            runner: windows-2022
+            channel: modern
+            builder_config: electron-builder.modern.cjs
+            output: modern
+          - target: win7
+            description: Windows 7 x64
+            runner: windows-2022
+            channel: legacy
+            builder_config: electron-builder.legacy.cjs
+            output: legacy
+    runs-on: ${{ matrix.runner }}
+    env:
+      RELEASE_CHANNEL: ${{ matrix.channel }}
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      BUILD_TARGET: ${{ matrix.target }}
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Select isolated release channel manifest
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs')
+          const channel = process.env.RELEASE_CHANNEL
+          const current = require('./package.json')
+          const preset = require('./package.' + channel + '.json')
+          const spec = preset.devDependencies.electron
+          const expected = channel === 'legacy' ? 21 : 32
+          if (Number(spec.match(/\d+/)?.[0] || 0) !== expected) {
+            throw new Error('Invalid Electron release channel: ' + channel)
+          }
+          current.releaseChannel = channel
+          current.devDependencies.electron = spec
+          // Original package.json version is the one source of truth.
+          fs.writeFileSync('package.json', JSON.stringify(current, null, 2) + '\n')
+          console.log('Building', current.version, channel, 'Electron', spec)
+          NODE
+
+      - name: Install matching Electron and project dependencies
+        # package-lock.json is from Electron 21; do not reuse it for modern Electron 32.
+        shell: bash
+        run: npm install --no-package-lock --no-audit --no-fund
+
+      - name: Verify actual installed Electron
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const spec = process.env.RELEASE_CHANNEL === 'legacy' ? 21 : 32
+          const installed = require('./node_modules/electron/package.json').version
+          if (Number(installed.split('.')[0]) !== spec) {
+            throw new Error('Wrong Electron runtime: ' + installed + ' expected ' + spec)
+          }
+          console.log('Electron', installed, 'OK')
+          NODE
+
+      - name: Build web resources
+        shell: bash
+        run: npm run build:prod
+
+      - name: Package native installers
+        shell: bash
+        run: |
+          if [ "$BUILD_TARGET" = mac ]; then
+            npx --no-install electron-builder --config "${{ matrix.builder_config }}" --mac zip --x64 --arm64 --publish never
+          else
+            npx --no-install electron-builder --config "${{ matrix.builder_config }}" --win nsis --x64 --publish never
+          fi
+
+      - name: Collect and verify expected installers
+        shell: bash
+        run: |
+          node scripts/ci-collect-desktop.cjs "$BUILD_TARGET"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dspace-packages-${{ matrix.target }}
+          path: all-packages/
+          if-no-files-found: error
+          retention-days: 14
+
+  all-packages:
+    name: Merge four installers into one flat directory
+    needs: package
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download and merge build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dspace-packages-*
+          merge-multiple: true
+          path: all-packages
+
+      - name: Check package completeness
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find all-packages -maxdepth 1 -type f | wc -l | tr -d ' ')" = 4
+          test "$(find all-packages -maxdepth 1 -type f -name '*.zip' | wc -l | tr -d ' ')" = 2
+          test "$(find all-packages -maxdepth 1 -type f -name '*.exe' | wc -l | tr -d ' ')" = 2
+          test "$(find all-packages -mindepth 1 -type d | wc -l | tr -d ' ')" = 0
+          test "$(find all-packages -maxdepth 1 -type f -name '*-Mac-Intel-x64.zip' | wc -l | tr -d ' ')" = 1
+          test "$(find all-packages -maxdepth 1 -type f -name '*-Mac-AppleSilicon-arm64.zip' | wc -l | tr -d ' ')" = 1
+          test "$(find all-packages -maxdepth 1 -type f -name '*-Win7-x64.exe' | wc -l | tr -d ' ')" = 1
+          test "$(find all-packages -maxdepth 1 -type f -name '*-Win10-11-x64.exe' | wc -l | tr -d ' ')" = 1
+          ls -lh all-packages/
+
+      - name: Upload one complete package collection
+        uses: actions/upload-artifact@v4
+        with:
+          name: D-Space-all-platforms
+          path: all-packages/
+          retention-days: 14
+          if-no-files-found: error
